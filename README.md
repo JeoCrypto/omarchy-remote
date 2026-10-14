@@ -16,7 +16,7 @@ workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you
 
 ## Contents
 
-[Features](#features) · [Requirements](#requirements) · [Install](#install) · [Use](#use) · [The manager](#the-manager-super--shift--r) ·
+[Features](#features) · [Quick start](#quick-start) · [Requirements](#requirements) · [Install](#install) · [Use](#use) · [The manager](#the-manager-super--shift--r) ·
 [Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
 [Keeping Windows reachable](#keeping-windows-computers-reachable) · [Security](#security-and-privacy) ·
 [Troubleshooting](#troubleshooting) · [Development](#development) · [Credits](#credits-and-licenses)
@@ -34,6 +34,22 @@ workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you
 
 > This is a wrapper around existing tools, not a new RDP implementation. The protocol work is done by
 > [FreeRDP](https://www.freerdp.com) (Windows) and [libvncclient](https://libvnc.github.io) (Mac).
+
+## Quick start
+
+1. **Run the guided setup** (adds the plugin, installs missing packages after asking, checks Tailscale, installs everything):
+   ```
+   bash <(curl -fsSL https://raw.githubusercontent.com/JeoCrypto/omarchy-remote/main/setup.sh)
+   ```
+   Prefer to read it first? It is [`setup.sh`](setup.sh), about 90 lines. Or follow [Install](#install) by hand.
+2. **Tailscale on every computer** you want to reach, signed in to the same account (`sudo tailscale up` here).
+3. **Turn on remote access on each target.** Windows: Settings > System > Remote Desktop. Mac: System Settings >
+   General > Sharing > Screen Sharing. Linux: an SSH server.
+4. **Press `Super + R`**, pick a computer. The first time it asks for the user name and password once and saves the
+   password in your keyring. After that it is one click.
+
+If you added the plugin through the marketplace or `omarchy plugin add` and skipped step 1, the bar shows a
+**Set up remote** chip. Click it to run the same guided setup.
 
 ## Requirements
 

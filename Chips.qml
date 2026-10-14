@@ -58,7 +58,7 @@ BarWidget {
   Process {
     id: statusProcess
     running: false
-    command: ["remote-desktop-status"]
+    command: ["bash", "-c", "command -v remote-desktop-status >/dev/null || exit 127; exec remote-desktop-status"]
     stdout: StdioCollector { id: statusStdout; waitForEnd: true }
     onExited: function(exitCode) {
       if (exitCode !== 0) { root.computers = root.setupChip; return }
