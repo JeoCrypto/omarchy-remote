@@ -83,7 +83,7 @@ The plugin only draws the bar chips and the `Super + R` picker; the helper progr
 works from either location. `omarchy plugin update omarchy-remote` then pulls new versions (run `./install.sh` again
 if the scripts changed).
 
-The installer checks the dependencies, builds `omarchy-vnc`, installs the scripts into `~/.local/bin`, installs
+The installer first lists what it will change and asks to continue (`--yes` skips the question). It checks the dependencies, builds `omarchy-vnc`, installs the scripts into `~/.local/bin`, installs
 the shell plugin (bar chips and picker in one), and adds clearly marked blocks to `~/.config/hypr/hyprland.lua` and
 `bindings.lua`. Every file it edits gets a timestamped backup, and if Hyprland rejects the result the old files are
 restored.

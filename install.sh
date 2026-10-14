@@ -5,6 +5,7 @@
 #
 #   ./install.sh              install (or update in place)
 #   ./install.sh --dry-run    show what would happen, change nothing
+#   ./install.sh --yes        do not ask for confirmation
 #   ./install.sh --no-build   skip compiling omarchy-vnc (use a prebuilt binary in ./omarchy-vnc)
 #
 # Everything lives in your home directory. Every file we edit gets a timestamped backup, our edits are
@@ -22,12 +23,13 @@ CONF="$HOME/.config/omarchy/remote-computers.json"
 STATE="$PREFIX/state/omarchy-remote"
 stamp=$(date +%Y%m%d-%H%M%S)
 
-dry=0; build=1
+dry=0; build=1; yes=0
 for a in "$@"; do
   case "$a" in
+    --yes|-y) yes=1 ;;
     --dry-run) dry=1 ;;
     --no-build) build=0 ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
 done
@@ -35,6 +37,21 @@ done
 say()  { printf '\033[1m==>\033[0m %s\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 run()  { if (( dry )); then printf '    [dry-run] %s\n' "$*"; else "$@"; fi; }
+
+# ---- 0. consent ---------------------------------------------------------------------------------
+if (( ! dry && ! yes )) && [[ -r /dev/tty ]]; then
+  cat <<EOF
+This will change, in your home directory only:
+  - install programs into $BIN and a plugin into $PLUGINS/omarchy-remote
+  - add one marked block to ~/.config/hypr/hyprland.lua and one to ~/.config/hypr/bindings.lua
+    (new keys: Super+R, Super+Shift+R, and Super+F, which replaces Omarchy's "Full screen" key with one that
+     behaves the same for normal windows)
+  - create ~/.config/omarchy/remote-computers.json if it does not exist
+Every edited file is backed up first; ./uninstall.sh reverts all of it. (Use --dry-run to preview.)
+EOF
+  read -r -p "Continue? [Y/n] " ans </dev/tty || ans=n
+  [[ -z $ans || $ans == [Yy]* ]] || { echo "Nothing changed."; exit 0; }
+fi
 
 # ---- 1. dependencies ------------------------------------------------------------------------------
 say "Checking dependencies"
