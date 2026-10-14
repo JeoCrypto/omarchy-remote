@@ -20,6 +20,7 @@ Item {
   property int selectedIndex: 0
   property bool cursorActive: true
   property bool loaded: false
+  property bool missingHelpers: false
   property var computers: []
 
   // Same surface tokens as the Omarchy menu, so every theme styles this too.
@@ -158,7 +159,8 @@ Item {
     command: ["remote-desktop-status"]
     stdout: StdioCollector { id: statusStdout; waitForEnd: true }
     onExited: function(exitCode) {
-      if (exitCode !== 0) return
+      root.missingHelpers = exitCode !== 0
+      if (exitCode !== 0) { root.computers = []; root.loaded = true; if (root.opened) root.rebuild(); return }
       try { root.computers = JSON.parse(String(statusStdout.text || "[]")) } catch (e) { }
       root.loaded = true
       if (root.opened) root.rebuild()
@@ -390,6 +392,7 @@ Item {
             Text {
               textFormat: Text.PlainText
               text: !root.loaded ? "Looking for computers…"
+                    : root.missingHelpers ? "Setup needed. In a terminal run:\n~/.config/omarchy/plugins/omarchy-remote/setup.sh"
                     : (root.filterText ? "No matches for “" + root.filterText + "”" : "No computers on your Tailscale")
               color: root.foreground
               opacity: 0.7

@@ -26,14 +26,20 @@ BarWidget {
     if (!statusProcess.running) statusProcess.running = true
   }
 
+  // Shown when the helper programs are missing (plugin added, ./install.sh not run yet).
+  readonly property string setupCommand: "omarchy-launch-tui --app-id=org.omarchy.terminal bash -c "
+    + Util.shellQuote("exec \"$HOME/.config/omarchy/plugins/omarchy-remote/setup.sh\"")
+  readonly property var setupChip: [{ id: "__setup", label: "Set up remote", os: "windows", online: true, open: false }]
+
   function connect(id) {
     if (!root.bar) return
+    if (id === "__setup") { root.bar.run(root.setupCommand); return }
     root.bar.run("remote-desktop " + Util.shellQuote(id))
     refreshSoon.restart()
   }
 
   function disconnect(id) {
-    if (!root.bar) return
+    if (!root.bar || id === "__setup") return
     root.bar.run("remote-desktop --disconnect " + Util.shellQuote(id))
     refreshSoon.restart()
   }
@@ -43,6 +49,7 @@ BarWidget {
   }
 
   function statusText(c) {
+    if (c.id === "__setup") return "The helper programs are not installed yet. Click to run the setup."
     if (c.open) return c.label + ": connected (right-click to disconnect)"
     if (c.online) return c.label + ": online, click to connect"
     return c.label + ": offline"
@@ -54,7 +61,7 @@ BarWidget {
     command: ["remote-desktop-status"]
     stdout: StdioCollector { id: statusStdout; waitForEnd: true }
     onExited: function(exitCode) {
-      if (exitCode !== 0) return
+      if (exitCode !== 0) { root.computers = root.setupChip; return }
       try { root.computers = JSON.parse(String(statusStdout.text || "[]")) } catch (e) { }
     }
   }
