@@ -11,7 +11,7 @@ import qs.Ui
 // ~/.local/bin/remote-desktop <id>, which switches to the computer's workspace.
 BarWidget {
   id: root
-  moduleName: "omarchy-remote.chips"
+  moduleName: "omarchy-remote"
 
   property var computers: []
 

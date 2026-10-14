@@ -42,7 +42,7 @@ run pkill -x sdl-freerdp3 || true
 run pkill -x omarchy-vnc || true
 
 say "Removing the plugins"
-for p in omarchy-remote.chips omarchy-remote.picker; do
+for p in omarchy-remote omarchy-remote.chips omarchy-remote.picker; do
   if [[ -d $PLUGINS/$p ]]; then run omarchy plugin remove "$p" --yes || run rm -rf "$PLUGINS/$p"; fi
 done
 

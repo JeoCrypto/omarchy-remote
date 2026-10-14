@@ -69,7 +69,7 @@ Item {
   function dismiss() {
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
-      root.shell.hide((root.manifest && root.manifest.id) || "omarchy-remote.picker")
+      root.shell.hide((root.manifest && root.manifest.id) || "omarchy-remote")
   }
 
   function toggle() {

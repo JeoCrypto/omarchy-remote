@@ -48,15 +48,29 @@ omarchy pkg add freerdp libsecret jq openssh gcc make pkgconf sdl3 libvncserver
 
 ## Install
 
+**From a clone** (recommended; builds the Mac viewer and sets everything up):
+
 ```
 git clone https://github.com/JeoCrypto/omarchy-remote.git && cd omarchy-remote
 ./install.sh --dry-run     # see exactly what it will do
 ./install.sh
 ```
 
+**Through Omarchy's plugin manager** (the same repo, listed in the plugin marketplace):
+
+```
+omarchy plugin add https://github.com/JeoCrypto/omarchy-remote.git
+cd ~/.config/omarchy/plugins/omarchy-remote && ./install.sh
+```
+
+The plugin only draws the bar chips and the `Super + R` picker; the helper programs come from `install.sh`, which
+works from either location. `omarchy plugin update omarchy-remote` then pulls new versions (run `./install.sh` again
+if the scripts changed).
+
 The installer checks the dependencies, builds `omarchy-vnc`, installs the scripts into `~/.local/bin`, installs
-two Omarchy shell plugins, and adds clearly marked blocks to `~/.config/hypr/hyprland.lua` and `bindings.lua`.
-Every file it edits gets a timestamped backup, and if Hyprland rejects the result the old files are restored.
+the shell plugin (bar chips and picker in one), and adds clearly marked blocks to `~/.config/hypr/hyprland.lua` and
+`bindings.lua`. Every file it edits gets a timestamped backup, and if Hyprland rejects the result the old files are
+restored.
 
 Remove everything with `./uninstall.sh` (add `--purge` to also delete your computer list and saved passwords).
 

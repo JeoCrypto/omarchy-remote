@@ -1,6 +1,7 @@
 #!/bin/bash
 # omarchy-remote: developed by JeoCrypto
-# omarchy-remote installer.
+# omarchy-remote installer. Run it from a clone, or from ~/.config/omarchy/plugins/omarchy-remote after
+# 'omarchy plugin add https://github.com/JeoCrypto/omarchy-remote.git'.
 #
 #   ./install.sh              install (or update in place)
 #   ./install.sh --dry-run    show what would happen, change nothing
@@ -26,7 +27,7 @@ for a in "$@"; do
   case "$a" in
     --dry-run) dry=1 ;;
     --no-build) build=0 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
 done
@@ -110,7 +111,7 @@ if (( ! dry )) && [[ -f $HYPR/hyprland.lua ]]; then
   sed -i '/^require("hypr\.remote")[[:space:]]*$/d' "$HYPR/hyprland.lua"
 fi
 replace_block "$HYPR/hyprland.lua" "omarchy-remote" 'require("hypr.remote")'
-replace_block "$HYPR/bindings.lua" "omarchy-remote" 'o.bind("SUPER + R", "Remote computers", "omarchy-shell shell toggle omarchy-remote.picker")
+replace_block "$HYPR/bindings.lua" "omarchy-remote" 'o.bind("SUPER + R", "Remote computers", "omarchy-shell shell toggle omarchy-remote")
 o.bind("SUPER + SHIFT + R", "Manage remote computers", "omarchy-launch-tui --app-id=org.omarchy.terminal remote-manage")
 -- Super+F: same as Omarchy'"'"'s "Full screen" for normal windows; pixel-exact fullscreen for remote computers.
 hl.unbind("SUPER + F")
@@ -134,22 +135,23 @@ if (( ! dry )); then
 fi
 
 # ---- 5. Omarchy shell plugins -----------------------------------------------------------------------
-say "Installing the bar chips and the Super+R picker"
-# development builds used other ids; remove them so nothing shows twice
-for old in jeo.remote jeo.remote-picker; do
+say "Installing the shell plugin (bar chips + Super+R picker)"
+# earlier builds used other ids; remove them so nothing shows twice
+for old in jeo.remote jeo.remote-picker omarchy-remote.chips omarchy-remote.picker; do
   if [[ -d $PLUGINS/$old ]]; then note "removing the old '$old'"; run omarchy plugin remove "$old" --yes || true; fi
 done
-for p in omarchy-remote.chips omarchy-remote.picker; do
-  run rm -rf "$PLUGINS/$p"
-  run mkdir -p "$PLUGINS"
-  run cp -r "$here/plugins/$p" "$PLUGINS/$p"
-done
+if [[ $here == "$PLUGINS/omarchy-remote" ]]; then
+  note "already in place (added with 'omarchy plugin add')"
+else
+  run rm -rf "$PLUGINS/omarchy-remote"
+  run mkdir -p "$PLUGINS/omarchy-remote"
+  run cp "$here/manifest.json" "$here/Chips.qml" "$here/Picker.qml" "$PLUGINS/omarchy-remote/"
+fi
 if (( ! dry )); then
   omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
   sleep 1
 fi
-run omarchy plugin enable omarchy-remote.chips --after omarchy.workspaces || note "could not place the chips widget; add 'omarchy-remote.chips' to your bar in ~/.config/omarchy/shell.json"
-run omarchy plugin enable omarchy-remote.picker || true
+run omarchy plugin enable omarchy-remote --after omarchy.workspaces || note "could not place the chips widget; add 'omarchy-remote' to your bar in ~/.config/omarchy/shell.json"
 # a running shell can keep an old copy of a widget in memory; a restart is the reliable way to load it
 if (( ! dry )); then omarchy restart shell >/dev/null 2>&1 || true; fi
 

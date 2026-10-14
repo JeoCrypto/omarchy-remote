@@ -1,16 +1,20 @@
 {
   "schemaVersion": 1,
-  "id": "omarchy-remote.chips",
+  "id": "omarchy-remote",
   "name": "Remote computers",
   "version": "1.0.0",
   "author": "JeoCrypto",
   "license": "MIT",
-  "description": "Remote computers as workspaces: one chip per computer in ~/.config/omarchy/remote-computers.json. Click to switch to its full-screen remote desktop, connecting first if needed.",
+  "homepage": "https://github.com/JeoCrypto/omarchy-remote",
+  "description": "One-click remote desktops: your Tailscale computers as bar chips and a Super+R picker. Needs the helper scripts from ./install.sh.",
   "kinds": [
-    "bar-widget"
+    "bar-widget",
+    "overlay"
   ],
+  "keepLoaded": true,
   "entryPoints": {
-    "barWidget": "Chips.qml"
+    "barWidget": "Chips.qml",
+    "overlay": "Picker.qml"
   },
   "barWidget": {
     "displayName": "Remote computers",
