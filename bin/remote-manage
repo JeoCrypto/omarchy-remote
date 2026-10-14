@@ -7,7 +7,7 @@
 #   remote-manage config     print every computer's EFFECTIVE settings, defaults marked
 #
 # Normal mode:  j/k move  g/G top/bottom  Enter connect  d disconnect  a add  e edit  p password  t test login
-#               f star  h hide/show  x remove  M Mac display  r refresh  / (or i) filter  ? help  q quit
+#               f star  h hide/show  x remove  M Mac display  T tmux  r refresh  / (or i) filter  ? help  q quit
 # Filter mode:  type to filter, Esc goes back to normal mode.
 #
 # Settings are stored in ~/.config/omarchy/remote-computers.json (see README). A fresh install
@@ -43,7 +43,7 @@ pw_saved() { secret-tool lookup service omarchy-remote name "$1" >/dev/null 2>&1
 rows() {
   local stars; stars=$(jq -R -s -c 'split("\n") | map(select(length > 0))' "$STARS" 2>/dev/null || echo '[]')
   status | jq -r --argjson stars "$stars" '
-    def icon:  if .os == "macos" then "󰀵" elif .os == "linux" then "󰌽" else "󰍲" end;
+    def icon:  if .os == "macos" then "󰀵" elif .os == "linux" then "󰌽" elif .os == "ssh" then "󰆍" else "󰍲" end;
     def glyph: if .open then "●" elif .online then "○" else "·" end;
     def state: if .hidden then "hidden" elif .open then "connected" elif .online then "online" else "offline" end;
     def starred: (.id as $i | $stars | index($i)) != null;
@@ -85,8 +85,15 @@ show() {
              line "command key" "$(eff "$host" cmd ctrl)"
              line "match display" "$(eff "$host" mac_display on)"
              line "display size" "$(eff "$host" mac_size 'closest to the window')" ;;
-    *)       line "client" "$(eff "$host" client ssh)" ;;
+    *)       line "client" "$(eff "$host" client ssh)"
+             line "user" "$(eff "$host" user '(from your ssh config)')" ;;
   esac
+  if [[ $os != windows ]]; then
+    local sa; sa=$(jq -r '.ssh // ""' <<<"$c")
+    [[ -n $sa ]] && line "ssh name" "$sa  ${dim}(from ~/.ssh/config)${rst}"
+    line "tmux" "$(eff "$host" tmux on)"
+    line "tmux session" "$(eff "$host" session main)"
+  fi
   line "workspace" "$host"
   line "log" "remote-desktop-$host.log"
   printf '\n  %s(set) yours   (default) built-in%s\n' "$dim" "$rst"
@@ -110,11 +117,12 @@ help() {
     h              hide / show a computer (hidden ones leave the bar and Super+R)
     x              remove: forgets the password and settings; for a computer you added,
                    it removes the computer itself
+    T              tmux: pick or create a session on the computer (Mac, Linux, ssh hosts)
     M              Mac display (size, restore)
     r              refresh status            q / Esc quit
     / or i         filter by typing; Esc returns to normal mode
 
-  The list shows every computer on your Tailscale. Settings are optional:
+  The list shows every computer on your Tailscale, plus the hosts in your ~/.ssh/config. Settings are optional:
   everything has a default, and the preview marks what you changed.
 
   Press q to close.
@@ -157,8 +165,9 @@ edit() {
     [[ $(jq -r .manual <<<"$c") == true ]] && items+=("System")
     case $os in
       windows) items+=("Client" "UI scale") ;;
-      macos)   items+=("Client" "Screen fit" "Command key" "Display size" "Match display on/off") ;;
-      *)       items+=("Client") ;;
+      macos)   items+=("Client" "Screen fit" "Command key" "Display size" "Match display on/off" "tmux on/off" "tmux session name") ;;
+      linux)   items+=("Client" "tmux on/off" "tmux session name") ;;
+      *)       items+=("tmux on/off" "tmux session name") ;;
     esac
     items+=("Reset to defaults" "Done")
     choice=$(printf '%s\n' "${items[@]}" | gum choose --header "Edit $label" --cursor "> " --height 14) || return
@@ -185,6 +194,14 @@ edit() {
       "Match display on/off")
         v=$(pick "Change the Mac's display while connected?" "$(ov_get "$host" mac_display)" on off) || continue
         if [[ $v == on ]]; then ov_del "$host" mac_display; else ov_set "$host" mac_display off; fi ;;
+      "tmux on/off")
+        v=$(pick "Attach to a tmux session when you connect over ssh?" "$(ov_get "$host" tmux)" on off) || continue
+        if [[ $v == on ]]; then ov_del "$host" tmux; else ov_set "$host" tmux off; fi ;;
+      "tmux session name")
+        v=$(gum input --value "$(ov_get "$host" session)" --prompt "Default session > " --placeholder "main") || continue
+        if [[ -z $v ]]; then ov_del "$host" session
+        elif [[ $v =~ ^[A-Za-z0-9._-]+$ ]]; then ov_set "$host" session "$v"
+        else echo "  Use letters, digits, dots, dashes and underscores."; pause; fi ;;
       "Reset to defaults")
         gum confirm "Reset every setting of $label to its default?" && ov_reset "$host" ;;
       Done) return ;;
@@ -264,18 +281,38 @@ mac_menu() {
   esac
 }
 
+tmux_menu() {
+  local id="$1" c os out rc choice name label
+  c=$(computer "$id"); os=$(jq -r .os <<<"$c"); label=$(jq -r .label <<<"$c")
+  [[ $os == windows ]] && { echo "  tmux is for Mac, Linux and ssh computers."; pause; return; }
+  echo "  Asking $label for its tmux sessions..."
+  out=$(remote-sessions "$id"); rc=$?
+  (( rc == 0 )) || { echo "  Could not reach $label over ssh (key login needed: ssh-copy-id)."; pause; return; }
+  choice=$( { [[ -n $out ]] && awk -F'\t' '{ printf "%s  (%s window%s%s)\n", $1, $2, ($2 == 1 ? "" : "s"), ($3 > 0 ? ", attached elsewhere" : "") }' <<<"$out"; echo "+ New session"; echo "Back"; } \
+    | gum choose --header "tmux on $label" --cursor "> " --height 14) || return
+  case $choice in
+    Back) return ;;
+    "+ New session")
+      name=$(gum input --prompt "  Session name > " --placeholder "e.g. work") || return
+      [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "  Use letters, digits, dots, dashes and underscores."; pause; return; } ;;
+    *) name=${choice%% *} ;;
+  esac
+  setsid -f remote-desktop --session "$name" "$id" >/dev/null 2>&1
+  echo "  Opening $name..."; sleep 0.5
+}
+
 # ---------- entry points --------------------------------------------------------------------------
 interactive() {
   command -v fzf >/dev/null 2>&1 || { echo "remote-manage needs fzf:  omarchy pkg add fzf"; exit 1; }
   command -v gum >/dev/null 2>&1 || { echo "remote-manage needs gum:  omarchy pkg add gum"; exit 1; }
   command -v remote-desktop-status >/dev/null 2>&1 || { echo "omarchy-remote is not installed (run install.sh)"; exit 1; }
-  local keys="j,k,g,G,e,p,t,f,x,h,a,d,M,r,q,?,i"
+  local keys="j,k,g,G,e,p,t,f,x,h,a,d,M,T,r,q,?,i"
   local esc_action='[[ $FZF_INPUT_STATE == hidden ]] && echo abort || echo "hide-input+clear-query+disable-search+rebind('"$keys"')"'
   # cache-first: the cached list shows at once, live status replaces it a moment later
   rows | fzf --ansi --delimiter=$'\t' --with-nth=2 --no-sort --disabled --no-input --ghost 'type / to filter' \
       --layout=reverse --height=100% --border=rounded --border-label ' Remote computers ' --info=hidden --pointer='▌' --highlight-line \
       --padding='1,2' --prompt='' \
-      --footer $' ↵ connect   d disconnect   a add   e edit\n p password   t test   f star   h hide   x remove\n M Mac display   r refresh   / filter   ? help   q quit' --footer-border=line \
+      --footer $' ↵ connect   d disconnect   a add   e edit\n p password   t test   f star   h hide   x remove\n M Mac display   T tmux   r refresh   / filter   ? help   q quit' --footer-border=line \
       --preview "$SELF show {1}" --preview-window 'right,48%,border-left,<110(down,50%,border-top)' \
       --bind "start:reload($SELF rows-fresh)" \
       --bind 'j:down,k:up,g:first,G:last,ctrl-d:half-page-down,ctrl-u:half-page-up' \
@@ -289,6 +326,7 @@ interactive() {
       --bind "h:execute-silent($SELF hide {1})+reload($SELF rows)+refresh-preview" \
       --bind "d:execute-silent($SELF disconnect {1})+reload($SELF rows-fresh)+refresh-preview" \
       --bind "M:execute($SELF mac {1})+refresh-preview" \
+      --bind "T:execute($SELF tmux {1})+reload($SELF rows-fresh)+refresh-preview" \
       --bind "r:reload($SELF rows-fresh)+refresh-preview" \
       --bind "?:execute($SELF help | gum pager)" \
       --bind "q:abort" \
@@ -309,6 +347,7 @@ case "${1:-}" in
   password)      remote-desktop-setup "${2:-}" ;;
   test)          test_login "${2:-}" ;;
   forget)        forget "${2:-}" ;;
+  tmux)          tmux_menu "${2:-}" ;;
   mac)           mac_menu "${2:-}" ;;
   disconnect)    remote-desktop --disconnect "${2:-}" ;;
   add)           add_device ;;

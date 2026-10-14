@@ -45,6 +45,7 @@ BarWidget {
   }
 
   function osIcon(os) {
+    if (os === "ssh") return "\uDB80\uDD8D"
     return os === "macos" ? "\uDB80\uDC35" : "\uDB80\uDF72"
   }
 

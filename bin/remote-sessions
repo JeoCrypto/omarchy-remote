@@ -1,0 +1,14 @@
+#!/bin/bash
+# omarchy-remote: developed by JeoCrypto
+# List the tmux sessions on a computer, one per line:  name<TAB>windows<TAB>attached
+#   remote-sessions <computer>      (Tailscale machine name, ssh alias or label)
+# Exit codes: 0 listed (maybe none), 3 could not reach it over ssh, 4 unknown computer.
+set -uo pipefail
+key="${1:-}"
+c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
+[[ -n $c ]] || { echo "unknown computer: $key" >&2; exit 4; }
+host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c"); alias=$(jq -r '.ssh // ""' <<<"$c")
+target="$alias"; [[ -n $target ]] || target="${user:+$user@}$host"
+out=$(ssh -o BatchMode=yes -o ConnectTimeout=6 "$target" "tmux list-sessions -F '#{session_name}	#{session_windows}	#{session_attached}' 2>/dev/null; true"); rc=$?
+(( rc == 0 )) || exit 3
+printf '%s\n' "$out" | sed '/^$/d'

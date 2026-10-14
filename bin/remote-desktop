@@ -2,6 +2,7 @@
 # omarchy-remote: developed by JeoCrypto
 # Switch to a remote computer's workspace, opening the connection first if needed.
 # Usage: remote-desktop <computer>               (Tailscale machine name or its label)
+#        remote-desktop --session NAME <computer>  (open a tmux session on it, in a terminal on its workspace)
 #        remote-desktop --disconnect <computer>  (close its window; the computer's session keeps running)
 set -uo pipefail
 
@@ -11,32 +12,40 @@ if [[ ${1:-} == --disconnect ]]; then
   dc=$(remote-desktop-status --all | jq -c --arg k "${dkey,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
   [[ -n $dc ]] || { omarchy notification send -u critical "Remote" "Unknown computer '$dkey'"; exit 1; }
   dhost=$(jq -r .host <<<"$dc"); dlabel=$(jq -r .label <<<"$dc")
-  read -r daddr dpid < <(hyprctl clients -j | jq -r --arg h "$dhost" '[.[] | select(.workspace.name == $h)] | first | "\(.address // "") \(.pid // "")"')
-  if [[ -z ${daddr:-} ]]; then omarchy notification send "$dlabel is not open" "Nothing to disconnect."; exit 0; fi
-  hyprctl dispatch "hl.dsp.window.close({ window = \"address:$daddr\" })" >/dev/null 2>&1
-  for _ in $(seq 1 16); do
-    sleep 0.25
-    hyprctl clients -j | jq -e --arg a "$daddr" 'any(.[]; .address == $a)' >/dev/null || break
+  mapfile -t dwins < <(hyprctl clients -j | jq -r --arg h "$dhost" '.[] | select(.workspace.name == $h) | "\(.address) \(.pid)"')
+  if (( ${#dwins[@]} == 0 )); then omarchy notification send "$dlabel is not open" "Nothing to disconnect."; exit 0; fi
+  for w in "${dwins[@]}"; do
+    read -r daddr dpid <<<"$w"
+    hyprctl dispatch "hl.dsp.window.close({ window = \"address:$daddr\" })" >/dev/null 2>&1
+    for _ in $(seq 1 16); do
+      sleep 0.25
+      hyprctl clients -j | jq -e --arg a "$daddr" 'any(.[]; .address == $a)' >/dev/null || break
+    done
+    # a client that ignores the close request is stopped
+    if hyprctl clients -j | jq -e --arg a "$daddr" 'any(.[]; .address == $a)' >/dev/null && [[ -n ${dpid:-} ]]; then kill "$dpid" 2>/dev/null; fi
   done
-  # a client that ignores the close request is stopped
-  if hyprctl clients -j | jq -e --arg a "$daddr" 'any(.[]; .address == $a)' >/dev/null && [[ -n ${dpid:-} ]]; then kill "$dpid" 2>/dev/null; fi
   omarchy notification send "$dlabel disconnected" "The session keeps running on the computer. Click its chip to reconnect."
   exit 0
 fi
 
+session=""
+if [[ ${1:-} == --session ]]; then
+  session="${2:-}"; shift 2 || true
+  [[ $session =~ ^[A-Za-z0-9._-]+$ ]] || { omarchy notification send -u critical "Remote" "Bad tmux session name '$session'"; exit 1; }
+fi
 key="${1:-}"
 c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
 [[ -n $c ]] || { omarchy notification send -u critical "Remote" "Unknown computer '$key'"; exit 1; }
 
 label=$(jq -r .label <<<"$c"); host=$(jq -r .host <<<"$c"); client=$(jq -r .client <<<"$c")
-user=$(jq -r .user <<<"$c"); title=$(jq -r .title <<<"$c"); cmdmode=$(jq -r '.cmd // ""' <<<"$c"); fitmode=$(jq -r '.fit // ""' <<<"$c"); scalepct=$(jq -r '.scale // ""' <<<"$c"); os=$(jq -r .os <<<"$c"); macdisp=$(jq -r '.mac_display // ""' <<<"$c"); macsize=$(jq -r '.mac_size // ""' <<<"$c"); manual=$(jq -r '.manual // false' <<<"$c"); online=$(jq -r .online <<<"$c"); open=$(jq -r .open <<<"$c")
+user=$(jq -r .user <<<"$c"); title=$(jq -r .title <<<"$c"); cmdmode=$(jq -r '.cmd // ""' <<<"$c"); fitmode=$(jq -r '.fit // ""' <<<"$c"); scalepct=$(jq -r '.scale // ""' <<<"$c"); os=$(jq -r .os <<<"$c"); macdisp=$(jq -r '.mac_display // ""' <<<"$c"); macsize=$(jq -r '.mac_size // ""' <<<"$c"); manual=$(jq -r '.manual // false' <<<"$c"); sshalias=$(jq -r '.ssh // ""' <<<"$c"); tmuxmode=$(jq -r '.tmux // ""' <<<"$c"); defsession=$(jq -r '.session // ""' <<<"$c"); online=$(jq -r .online <<<"$c"); open=$(jq -r .open <<<"$c")
 class="omarchy-remote-$host"
 log="${XDG_RUNTIME_DIR:-/tmp}/remote-desktop-$host.log"
 
 focus_ws() { hyprctl dispatch "hl.dsp.focus({ workspace = \"name:$host\" })" >/dev/null 2>&1; }
 
-# Already open: just switch to it.
-if [[ $open == true ]]; then focus_ws; exit 0; fi
+# Already open: just switch to it (unless a tmux session was asked for: that opens another window here).
+if [[ $open == true && -z $session ]]; then focus_ws; exit 0; fi
 if [[ $online != true ]]; then
   # Tailscale's status flag can lag (e.g. the machine lost its control-plane link but is still reachable): ping to be sure.
   if [[ $manual == true ]] || ! tailscale ping --c 1 --timeout 4s "$host" >/dev/null 2>&1; then
@@ -117,6 +126,26 @@ mac_display_match() {
   fi
 }
 
+# Open a terminal on the computer's workspace running ssh; tmux keeps the session alive when you disconnect.
+# For a plain ssh computer this is the connection itself (session "main" unless set); for a desktop
+# computer it is an extra window next to the remote desktop (only when a session was asked for).
+tmux_window() {
+  local sess="${1:-}" target tclass remote
+  target="$sshalias"; [[ -n $target ]] || target="${user:+$user@}$host"
+  tclass="$class"; [[ $client != ssh ]] && tclass="$class-tmux"
+  if [[ $tmuxmode == off && -z $sess ]]; then
+    remote='exec "${SHELL:-sh}" -l'
+  else
+    : "${sess:=${defsession:-main}}"
+    remote="command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s '$sess' || { echo 'tmux is not installed here; opening a plain shell.'; exec \"\${SHELL:-sh}\" -l; }"
+  fi
+  setsid omarchy-launch-tui --app-id="$tclass" ssh -t "$target" "$remote" >/dev/null 2>&1 &
+  disown
+  if [[ $client == ssh ]]; then addr=$(wait_for "$tclass") && place_window "$addr" tiled; fi
+}
+
+if [[ -n $session && $client != ssh ]]; then tmux_window "$session"; exit 0; fi
+
 case "$client" in
   freerdp)
     # Render the remote desktop at this monitor's real pixel size and scale (crisp, 1:1 in fullscreen).
@@ -185,10 +214,7 @@ case "$client" in
     disown
     addr=$(wait_for org.remmina.Remmina "$title") && place_window "$addr" fullscreen
     ;;
-  ssh)
-    setsid omarchy-launch-terminal ssh "${user:+$user@}$host" >/dev/null 2>&1 &
-    disown
-    ;;
+  ssh) tmux_window "$session" ;;
   *) omarchy notification send -u critical "Remote" "Unknown client '$client' for $label"; exit 1 ;;
 esac
 exit 0

@@ -91,7 +91,7 @@ fi
 # ---- 3. files -----------------------------------------------------------------------------------
 say "Installing programs to $BIN"
 run mkdir -p "$BIN" "$SHARE" "$STATE"
-for f in remote-desktop remote-desktop-setup remote-desktop-status remote-fullscreen remote-manage; do
+for f in remote-desktop remote-desktop-setup remote-desktop-status remote-fullscreen remote-manage remote-sessions; do
   run install -m755 "$here/bin/$f" "$BIN/$f"
 done
 run install -m755 "$here/omarchy-vnc" "$BIN/omarchy-vnc"

@@ -17,7 +17,7 @@ workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you
 ## Contents
 
 [Features](#features) · [Quick start](#quick-start) · [Requirements](#requirements) · [Install](#install) · [Use](#use) · [The manager](#the-manager-super--shift--r) ·
-[Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
+[SSH and tmux](#ssh-hosts-and-tmux) · [Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
 [Keeping Windows reachable](#keeping-windows-computers-reachable) · [Security](#security-and-privacy) ·
 [Troubleshooting](#troubleshooting) · [Development](#development) · [Credits](#credits-and-licenses)
 
@@ -28,7 +28,7 @@ workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you
 | **Zero setup for new machines** | Join a computer to your tailnet and it appears by itself. |
 | **Windows** | FreeRDP's own window, sized to your monitor's real pixels: sharp, and it resizes with the window. |
 | **macOS** | `omarchy-vnc`, a tiny viewer included here (about 30 KB, libvncclient + SDL3): Apple login, two-way clipboard, optional display matching. |
-| **Linux** | An SSH session in a terminal. |
+| **Linux and SSH hosts** | A terminal on its own workspace running `ssh` with a persistent tmux session. Hosts from `~/.ssh/config` appear by themselves. |
 | **Passwords** | Kept in your keyring, never in a file, log or command line. |
 | **Omarchy shortcuts keep working** | `Super` never reaches the remote machine. |
 
@@ -116,6 +116,7 @@ with status glyphs (`●` connected, `○` online, `·` offline, `★` starred),
 |---|---|
 | `j` `k` `g` `G` | Move |
 | `Enter` | Connect |
+| `T` | **tmux**: list, open or create a session on the computer |
 | `d` | **Disconnect** (closes the window; the computer's session keeps running) |
 | `a` | **Add** a computer that is not on Tailscale (address, system, name, user, then its password) |
 | `e` | Edit: name, user, client, UI scale, Mac fit, Command key, Mac display size, reset |
@@ -131,6 +132,23 @@ with status glyphs (`●` connected, `○` online, `·` offline, `★` starred),
 
 The cached list appears instantly and live status replaces it a moment later. `remote-manage config` prints every
 computer's effective settings in the terminal. It needs `fzf` and `gum`, which ship with Omarchy.
+
+## SSH hosts and tmux
+
+Everything in your `~/.ssh/config` with an explicit `Host` name (no wildcards) shows up too, as a terminal computer
+with a `󰆍` glyph. If it is the same machine as one on your Tailscale, the SSH name is simply attached to it, so
+nothing appears twice.
+
+- **Click an SSH computer** (or press `Enter` on it in the manager): a terminal opens full size on its own workspace
+  and runs `ssh -t <host>` with `tmux new-session -A -s main`, so you land in the same tmux session every time.
+  If tmux is not installed on the other side you get a plain login shell, with a one-line note.
+- **`T` in the manager** lists the tmux sessions on that computer (Mac, Linux or SSH host). Pick one, or create a
+  new one. For a computer that is already open as a desktop, the session opens as an extra terminal next to it.
+- **Disconnect** closes the window; the tmux session keeps running on the computer, so you pick up exactly where you
+  were. Right-click a chip, `Ctrl + D` in `Super + R`, or `d` in the manager closes every window of that workspace.
+- Settings per computer (in the manager under `e`, or in `remote-computers.json`): `"tmux": "off"` for a plain shell,
+  `"session": "work"` for another default session name.
+- Needs key-based SSH login (`ssh-copy-id`), nothing else: no agent or daemon on the remote side except tmux itself.
 
 ## Computers that are not on Tailscale
 
@@ -166,6 +184,8 @@ Entries are matched on `host`, the Tailscale machine name.
 | `cmd` | Mac | `ctrl` (default: Ctrl+C becomes Command+C), `alt`, `none` |
 | `mac_display` | Mac | `"off"` to never change the Mac's display |
 | `mac_size` | Mac | Force a display mode such as `"1600x900"` instead of the closest match |
+| `tmux` | Mac, Linux, SSH | `"off"` opens a plain shell instead of a tmux session |
+| `session` | Mac, Linux, SSH | Default tmux session name (default `main`) |
 
 Environment variables for troubleshooting: `REMOTE_DEBUG=1` (verbose FreeRDP log), `REMOTE_FREERDP_ARGS="..."`
 (extra FreeRDP flags). Logs are in `$XDG_RUNTIME_DIR/remote-desktop-<host>.log`.

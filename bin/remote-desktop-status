@@ -8,26 +8,65 @@
 # Every Windows / macOS / Linux computer on your Tailscale appears automatically. Computers that are NOT on
 # Tailscale can be added by hand ("manual": true, with a host name or IP address and an "os") from the manager.
 # ~/.config/omarchy/remote-computers.json holds optional settings keyed by "host":
-# label, user, client (freerdp|vnc|ssh|remmina), fit, cmd, scale, mac_display, mac_size, hidden, title.
+# label, user, client (freerdp|vnc|ssh|remmina), fit, cmd, scale, mac_display, mac_size, hidden, title, tmux, session.
+#
+# Hosts from ~/.ssh/config (explicit "Host" names, no wildcards) also appear, as terminal ("ssh") computers, unless
+# they are the same machine as a Tailscale one; then the alias is attached to it (used for tmux sessions).
+# REMOTE_SSH_CONFIG points at another ssh config file (used by the tests).
 all=false; [[ ${1:-} == --all ]] && all=true
 cfg="${REMOTE_CONF:-$HOME/.config/omarchy/remote-computers.json}"
 over='[]'; [[ -r $cfg ]] && over=$(cat "$cfg")
 ts=$(tailscale status --json 2>/dev/null); [[ -n $ts ]] || ts='{}'
 cl=$(hyprctl clients -j 2>/dev/null);      [[ -n $cl ]] || cl='[]'
 
-# Manual computers are not on Tailscale, so check whether their remote-access port answers.
-reach='{}'
-while read -r h os; do
-  [[ $h =~ ^[A-Za-z0-9._-]+$ ]] || continue
-  port=22; [[ $os == windows ]] && port=3389; [[ $os == macos ]] && port=5900
-  if timeout 0.6 bash -c "exec 3<>/dev/tcp/$h/$port" 2>/dev/null; then v=true; else v=false; fi
-  reach=$(jq -c --arg h "${h,,}" --argjson v "$v" '.[$h] = $v' <<<"$reach")
-done < <(jq -r '.[] | select(.manual == true) | "\(.host) \(.os // "windows" | ascii_downcase)"' <<<"$over")
+# SSH config entries: explicit Host names only. One JSON object per host: alias, hostname, user, port.
+sshcfg="${REMOTE_SSH_CONFIG:-$HOME/.ssh/config}"
+ssh='[]'
+if [[ -r $sshcfg ]]; then
+  ssh=$(awk '
+    function flush(   i) { for (i = 1; i <= n; i++) printf "%s\t%s\t%s\t%s\n", al[i], (hn == "" ? al[i] : hn), us, pt; n = 0; hn = ""; us = ""; pt = "" }
+    tolower($1) == "host" { flush(); for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/ && $i !~ /^#/) al[++n] = $i; next }
+    tolower($1) == "match" { flush(); next }
+    tolower($1) == "hostname" && n { hn = $2 }
+    tolower($1) == "user" && n { us = $2 }
+    tolower($1) == "port" && n { pt = $2 }
+    END { flush() }' "$sshcfg" 2>/dev/null \
+    | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {alias: .[0], hostname: .[1], user: .[2], port: (.[3] | if . == "" then "22" else . end)})' 2>/dev/null)
+  [[ -n $ssh ]] || ssh='[]'
+fi
 
-jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjson all "$all" '
+# Computers that are not on Tailscale (added by hand, or from the ssh config) have no online flag: check, in
+# parallel, whether their remote-access port answers.
+reach='{}'
+probes=()
+while read -r h port; do
+  [[ $h =~ ^[A-Za-z0-9._-]+$ && $port =~ ^[0-9]+$ ]] && probes+=("$h $port")
+done < <(
+  jq -r '.[] | select(.manual == true) | "\(.host) \(.os // "windows" | ascii_downcase)"' <<<"$over" \
+    | while read -r h os; do p=22; [[ $os == windows ]] && p=3389; [[ $os == macos ]] && p=5900; echo "$h $p"; done
+  jq -r '.[] | "\(.hostname) \(.port)"' <<<"$ssh"
+)
+if (( ${#probes[@]} )); then
+  tmp=$(mktemp -d)
+  i=0
+  for pr in "${probes[@]}"; do
+    read -r h port <<<"$pr"
+    ( timeout 0.6 bash -c "exec 3<>/dev/tcp/$h/$port" 2>/dev/null && echo true || echo false ) > "$tmp/$i.res" &
+    echo "${h,,}" > "$tmp/$i.host"; echo "$port" > "$tmp/$i.port"
+    i=$((i + 1))
+  done
+  wait
+  for ((j = 0; j < i; j++)); do
+    reach=$(jq -c --arg k "$(cat "$tmp/$j.host"):$(cat "$tmp/$j.port")" --argjson v "$(cat "$tmp/$j.res")" '.[$k] = ($v or .[$k] // false)' <<<"$reach")
+  done
+  rm -rf "$tmp"
+fi
+
+jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjson ssh "$ssh" --argjson all "$all" '
   def short: (.DNSName // "" | split(".")[0] | ascii_downcase);
   def tidy($n): ($n | ascii_downcase | gsub("[-_]+"; " ") | split(" ") | map(select(length > 0) | (.[0:1] | ascii_upcase) + .[1:]) | join(" "));
   def client_default($os): if $os == "windows" then "freerdp" elif $os == "macos" then "vnc" else "ssh" end;
+  def sshalias($names): ($ssh | map(select((.hostname | ascii_downcase) as $h | ($names | index($h)) != null or ($names | index($h | split(".")[0])) != null or ((.alias | ascii_downcase) as $a | ($names | index($a)) != null)) | .alias) | first // "");
   [ (.Peer // {})[]
     | . as $p
     | select(((.OS // "") | ascii_downcase) as $os | $os == "windows" or $os == "macos" or $os == "linux")
@@ -52,6 +91,9 @@ jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjs
         online: ($p.Online == true or $p.Active == true or (($p.CurAddr // "") != "")),
         open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
         manual: false,
+        ssh: sshalias([$host, ($p.HostName // "" | ascii_downcase)]),
+        tmux: ($o.tmux // ""),
+        session: ($o.session // ""),
         hidden: ($o.hidden == "true" or $o.hidden == true)
       } ] as $peers
   | ($peers | map(.host)) as $ph
@@ -75,11 +117,38 @@ jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjs
           mac_display: ($o.mac_display // ""),
           mac_size: ($o.mac_size // ""),
           ip: $host,
-          online: ($reach[$host] // false),
+          online: ($reach[$host + ":" + (if $os == "windows" then "3389" elif $os == "macos" then "5900" else "22" end)] // false),
           open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
           manual: true,
+          ssh: sshalias([$host]),
+          tmux: ($o.tmux // ""),
+          session: ($o.session // ""),
           hidden: ($o.hidden == "true" or $o.hidden == true)
         } ] as $manual
-  | ($peers + $manual)
+  | (($peers + $manual) | map(.host)) as $known
+  | (($peers + $manual) | map(.ssh) | map(select(. != ""))) as $claimed
+  | [ $ssh[]
+      | . as $e
+      | ($e.alias | ascii_downcase) as $host
+      | select(($known | index($host)) == null and (($claimed | index($e.alias)) == null))
+      | ($over | map(select((.host // "" | ascii_downcase) == $host)) | first // {}) as $o
+      | {
+          id: $host,
+          host: $host,
+          label: ($o.label // $e.alias),
+          os: "ssh",
+          user: ($o.user // $e.user // ""),
+          client: "ssh",
+          title: "", cmd: "", fit: "", scale: "", mac_display: "", mac_size: "",
+          ip: $e.hostname,
+          online: ($reach[($e.hostname | ascii_downcase) + ":" + $e.port] // false),
+          open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
+          manual: false,
+          ssh: $e.alias,
+          tmux: ($o.tmux // ""),
+          session: ($o.session // ""),
+          hidden: ($o.hidden == "true" or $o.hidden == true)
+        } ] as $sshonly
+  | ($peers + $manual + $sshonly)
   | map(select($all or (.hidden | not)))
   | sort_by(.label | ascii_downcase)' <<<"$ts"

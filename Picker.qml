@@ -47,6 +47,7 @@ Item {
   function osIcon(os) {
     if (os === "macos") return "󰀵"
     if (os === "linux") return "󰌽"
+    if (os === "ssh") return "󰆍"
     return "󰍲"
   }
 
