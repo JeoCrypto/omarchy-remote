@@ -1,0 +1,58 @@
+#!/bin/bash
+# omarchy-remote: developed by JeoCrypto
+# One-time per Windows computer: ask for the user name and password, verify the login once,
+# keep the password in the GNOME keyring (never in a file), then connect.
+# Usage: remote-desktop-setup <computer>
+key="${1:-}"; over="$HOME/.config/omarchy/remote-computers.json"
+wait_key() { read -rp "Press Enter to close"; }
+c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
+[[ -n $c ]] || { echo "Unknown computer '$key'. On Tailscale: $(remote-desktop-status --all | jq -r '[.[].id] | join(", ")')"; wait_key; exit 1; }
+label=$(jq -r .label <<<"$c"); host=$(jq -r .host <<<"$c"); os=$(jq -r .os <<<"$c"); user=$(jq -r .user <<<"$c")
+[[ $os == windows || $os == macos ]] || { echo "$label needs no password setup (SSH uses your keys)."; wait_key; exit 1; }
+
+echo "Set up $label"
+read -rp "$([[ $os == macos ]] && echo "Mac" || echo "Windows") user name${user:+ [$user]}: " u; user="${u:-$user}"
+[[ -n $user ]] || { echo "No user name. Nothing saved."; wait_key; exit 1; }
+echo "Password (stored in your keyring, never shown or logged)."
+read -rsp "Password: " pw; echo
+read -rsp "Again:    " pw2; echo
+[[ -n $pw ]] || { echo "Empty password. Nothing saved."; wait_key; exit 1; }
+[[ $pw == "$pw2" ]] || { echo "The two entries differ. Nothing saved. Run it again."; wait_key; exit 1; }
+unset pw2
+
+echo "Checking the login with $label (one attempt)..."
+if [[ $os == macos ]]; then
+  # omarchy-vnc reports exact exit codes: 0 ok, 2 login rejected, 3 could not connect.
+  printf '%s\n' "$pw" | timeout 30 omarchy-vnc --host "$host" --user "$user" --check >/dev/null 2>&1
+  case $? in
+    0) ;;
+    2) echo "$label rejected that login: wrong user name or password. Nothing saved."
+       echo "Repeated failures can lock the account, so check before trying again."; wait_key; exit 1 ;;
+    *) echo "Could not reach $label. Is Screen Sharing on? (System Settings > General > Sharing). Nothing saved."; wait_key; exit 1 ;;
+  esac
+else
+  # FreeRDP's exit code is not a reliable signal in auth-only mode, so judge by what it reports.
+  out=$(printf '%s\n' "/v:$host" "/u:$user" "/p:$pw" /cert:tofu "/auth-pkg-list:!kerberos" +auth-only | timeout 25 sdl-freerdp3 /args-from:stdin 2>&1)
+  if grep -q 'LOGON_FAILURE' <<<"$out"; then
+    echo "$label rejected that login: wrong user name or password. Nothing saved."
+    echo "Repeated failures can lock the account, so check before trying again."
+    wait_key; exit 1
+  elif grep -qE 'CONNECT_FAILED.*0x0002000[0-9A-F]|connection (refused|timed out)|DNS|ERRCONNECT_(CONNECT_TRANSPORT_FAILED|DNS)' <<<"$out" && ! grep -qiE 'authentication only, exit status 0' <<<"$out"; then
+    echo "Could not reach $label. Nothing saved."
+    wait_key; exit 1
+  fi
+fi
+echo "Login accepted."
+
+printf '%s' "$pw" | secret-tool store --label="Omarchy remote: $label" service omarchy-remote name "$host" || { echo "Keyring store failed."; wait_key; exit 1; }
+unset pw
+
+# Remember the (non-secret) user name and use the clean client for this computer.
+[[ -f $over ]] || echo '[]' > "$over"
+tmp=$(mktemp)
+jq --arg h "$host" --arg u "$user" --arg c "$([[ $os == macos ]] && echo vnc || echo freerdp)" '
+  if any(.[]; .host == $h) then map(if .host == $h then .user = $u | .client = $c else . end)
+  else . + [{host: $h, user: $u, client: $c}] end' "$over" > "$tmp" && mv "$tmp" "$over"
+
+echo "Saved. Connecting..."
+exec remote-desktop "$host"

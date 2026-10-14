@@ -1,0 +1,85 @@
+#!/bin/bash
+# omarchy-remote: developed by JeoCrypto
+# JSON feed for the bar, the Super+R picker and the manager.
+#
+#   remote-desktop-status          visible computers
+#   remote-desktop-status --all    also the ones you hid (hidden: true)
+#
+# Every Windows / macOS / Linux computer on your Tailscale appears automatically. Computers that are NOT on
+# Tailscale can be added by hand ("manual": true, with a host name or IP address and an "os") from the manager.
+# ~/.config/omarchy/remote-computers.json holds optional settings keyed by "host":
+# label, user, client (freerdp|vnc|ssh|remmina), fit, cmd, scale, mac_display, mac_size, hidden, title.
+all=false; [[ ${1:-} == --all ]] && all=true
+cfg="${REMOTE_CONF:-$HOME/.config/omarchy/remote-computers.json}"
+over='[]'; [[ -r $cfg ]] && over=$(cat "$cfg")
+ts=$(tailscale status --json 2>/dev/null); [[ -n $ts ]] || ts='{}'
+cl=$(hyprctl clients -j 2>/dev/null);      [[ -n $cl ]] || cl='[]'
+
+# Manual computers are not on Tailscale, so check whether their remote-access port answers.
+reach='{}'
+while read -r h os; do
+  [[ $h =~ ^[A-Za-z0-9._-]+$ ]] || continue
+  port=22; [[ $os == windows ]] && port=3389; [[ $os == macos ]] && port=5900
+  if timeout 0.6 bash -c "exec 3<>/dev/tcp/$h/$port" 2>/dev/null; then v=true; else v=false; fi
+  reach=$(jq -c --arg h "${h,,}" --argjson v "$v" '.[$h] = $v' <<<"$reach")
+done < <(jq -r '.[] | select(.manual == true) | "\(.host) \(.os // "windows" | ascii_downcase)"' <<<"$over")
+
+jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjson all "$all" '
+  def short: (.DNSName // "" | split(".")[0] | ascii_downcase);
+  def tidy($n): ($n | ascii_downcase | gsub("[-_]+"; " ") | split(" ") | map(select(length > 0) | (.[0:1] | ascii_upcase) + .[1:]) | join(" "));
+  def client_default($os): if $os == "windows" then "freerdp" elif $os == "macos" then "vnc" else "ssh" end;
+  [ (.Peer // {})[]
+    | . as $p
+    | select(((.OS // "") | ascii_downcase) as $os | $os == "windows" or $os == "macos" or $os == "linux")
+    | (short) as $host
+    | select($host != "")
+    | ($over | map(select((.host // "" | ascii_downcase) == $host)) | first // {}) as $o
+    | (($p.OS | ascii_downcase)) as $os
+    | {
+        id: $host,
+        host: $host,
+        label: ($o.label // (if ($p.HostName // "") != "" then $p.HostName else tidy($host) end)),
+        os: $os,
+        user: ($o.user // ""),
+        client: ($o.client // client_default($os)),
+        title: ($o.title // ""),
+        cmd: ($o.cmd // ""),
+        fit: ($o.fit // ""),
+        scale: ($o.scale // ""),
+        mac_display: ($o.mac_display // ""),
+        mac_size: ($o.mac_size // ""),
+        ip: (($p.TailscaleIPs // [""])[0]),
+        online: ($p.Online == true or $p.Active == true or (($p.CurAddr // "") != "")),
+        open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
+        manual: false,
+        hidden: ($o.hidden == "true" or $o.hidden == true)
+      } ] as $peers
+  | ($peers | map(.host)) as $ph
+  | [ $over[]
+      | select(.manual == true)
+      | . as $o
+      | (($o.host // "") | ascii_downcase) as $host
+      | select($host != "" and ($host | test("^[a-z0-9._-]+$")) and (($ph | index($host)) == null))
+      | (($o.os // "windows") | ascii_downcase) as $os
+      | {
+          id: $host,
+          host: $host,
+          label: ($o.label // $host),
+          os: $os,
+          user: ($o.user // ""),
+          client: ($o.client // client_default($os)),
+          title: ($o.title // ""),
+          cmd: ($o.cmd // ""),
+          fit: ($o.fit // ""),
+          scale: ($o.scale // ""),
+          mac_display: ($o.mac_display // ""),
+          mac_size: ($o.mac_size // ""),
+          ip: $host,
+          online: ($reach[$host] // false),
+          open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
+          manual: true,
+          hidden: ($o.hidden == "true" or $o.hidden == true)
+        } ] as $manual
+  | ($peers + $manual)
+  | map(select($all or (.hidden | not)))
+  | sort_by(.label | ascii_downcase)' <<<"$ts"

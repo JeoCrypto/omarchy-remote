@@ -1,0 +1,14 @@
+#!/bin/bash
+# omarchy-remote: developed by JeoCrypto
+# Super+F: fullscreen toggle. For a remote-computer window, fill the monitor WITHOUT telling the
+# client it is fullscreen (so FreeRDP keeps sending the real pixel size and stays sharp).
+# Every other window gets Omarchy's normal fullscreen.
+cls=$(hyprctl activewindow -j 2>/dev/null | jq -r '.class // ""')
+fs=$(hyprctl activewindow -j 2>/dev/null | jq -r '.fullscreen // 0')
+if [[ $cls == omarchy-remote-* ]]; then
+  if [[ $fs == 0 ]]; then hyprctl dispatch 'hl.dsp.window.fullscreen_state({ internal = 2, client = 0 })' >/dev/null
+  else                    hyprctl dispatch 'hl.dsp.window.fullscreen_state({ internal = 0, client = 0 })' >/dev/null
+  fi
+else
+  hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen" })' >/dev/null
+fi

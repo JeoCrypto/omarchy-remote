@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchy-remote.chips",
+  "name": "Remote computers",
+  "version": "1.0.0",
+  "author": "JeoCrypto",
+  "license": "MIT",
+  "description": "Remote computers as workspaces: one chip per computer in ~/.config/omarchy/remote-computers.json. Click to switch to its full-screen remote desktop, connecting first if needed.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Chips.qml"
+  },
+  "barWidget": {
+    "displayName": "Remote computers",
+    "description": "Chips for your remote computers next to the workspaces.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "left"
+  }
+}

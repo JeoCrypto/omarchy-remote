@@ -1,0 +1,320 @@
+#!/bin/bash
+# omarchy-remote: developed by JeoCrypto
+# remote-manage: a keyboard-driven manager for your remote computers (fzf + gum), in the style of tmax.
+#
+#   remote-manage            open the manager (also: Super+Shift+R)
+#   remote-manage list       print the computers (one line each)
+#   remote-manage config     print every computer's EFFECTIVE settings, defaults marked
+#
+# Normal mode:  j/k move  g/G top/bottom  Enter connect  d disconnect  a add  e edit  p password  t test login
+#               f star  h hide/show  x remove  M Mac display  r refresh  / (or i) filter  ? help  q quit
+# Filter mode:  type to filter, Esc goes back to normal mode.
+#
+# Settings are stored in ~/.config/omarchy/remote-computers.json (see README). A fresh install
+# makes no connection; nothing is changed until you choose to.
+set -uo pipefail
+
+CONF="${REMOTE_CONF:-$HOME/.config/omarchy/remote-computers.json}"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-remote"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-remote"
+CACHE="$CACHE_DIR/status.json"
+STARS="$STATE_DIR/starred"
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+mkdir -p "$CACHE_DIR" "$STATE_DIR" "$(dirname "$CONF")"
+[[ -f $CONF ]] || echo '[]' > "$CONF"
+touch "$STARS"
+
+dim=$'\033[2m'; bold=$'\033[1m'; green=$'\033[32m'; rst=$'\033[0m'
+
+# ---------- data ----------------------------------------------------------------------------------
+fresh() { local t="$CACHE.$$"; if remote-desktop-status --all > "$t" 2>/dev/null && [[ -s $t ]]; then mv "$t" "$CACHE"; else rm -f "$t"; fi; }
+status() { [[ -s $CACHE ]] || fresh; cat "$CACHE" 2>/dev/null || echo '[]'; }
+computer() { status | jq -c --arg id "$1" '[.[] | select(.id == $id)] | first // empty'; }
+
+ov_get() { jq -r --arg h "$1" --arg k "$2" '[.[] | select(.host == $h)] | first | .[$k] // empty' "$CONF" 2>/dev/null; }
+ov_write() { local t; t=$(mktemp); if jq "$@" "$CONF" > "$t" && [[ -s $t ]]; then mv "$t" "$CONF"; else rm -f "$t"; return 1; fi; }
+ov_set() { ov_write --arg h "$1" --arg k "$2" --arg v "$3" 'if any(.[]; .host == $h) then map(if .host == $h then .[$k] = $v else . end) else . + [{host: $h, ($k): $v}] end'; fresh; }
+ov_del() { ov_write --arg h "$1" --arg k "$2" 'map(if .host == $h then del(.[$k]) else . end)'; fresh; }
+ov_reset() { ov_write --arg h "$1" 'map(select(.host != $h))'; fresh; }
+
+pw_saved() { secret-tool lookup service omarchy-remote name "$1" >/dev/null 2>&1; }
+
+# ---------- list ----------------------------------------------------------------------------------
+rows() {
+  local stars; stars=$(jq -R -s -c 'split("\n") | map(select(length > 0))' "$STARS" 2>/dev/null || echo '[]')
+  status | jq -r --argjson stars "$stars" '
+    def icon:  if .os == "macos" then "󰀵" elif .os == "linux" then "󰌽" else "󰍲" end;
+    def glyph: if .open then "●" elif .online then "○" else "·" end;
+    def state: if .hidden then "hidden" elif .open then "connected" elif .online then "online" else "offline" end;
+    def starred: (.id as $i | $stars | index($i)) != null;
+    def rank: (if .hidden then 100 else 0 end) + (if starred then 0 else 10 end) + (if .open then 0 elif .online then 1 else 2 end);
+    def color: if .hidden then "\u001b[2m" elif .open then "\u001b[32m" elif .online then "" else "\u001b[2m" end;
+    def pad($s; $n): $s + (" " * ([$n - ($s | length), 0] | max));
+    (map(.label | length) | max // 0) as $w
+    | sort_by([rank, (.label | ascii_downcase)]) | .[] |
+    "\(.id)\t\(color)\(glyph) \(icon)  \(pad(.label; $w))  \(pad(state; 9))  \(if starred then "★" else " " end) \(if .manual then "added " else "      " end)\(.ip)\u001b[0m"'
+}
+
+# ---------- effective settings --------------------------------------------------------------------
+eff() {  # eff HOST KEY DEFAULT -> "value (set)" or "default (default)"
+  local v; v=$(ov_get "$1" "$2")
+  if [[ -n $v ]]; then printf '%s  %s(set)%s' "$v" "$green" "$rst"; else printf '%s  %s(default)%s' "$3" "$dim" "$rst"; fi
+}
+
+show() {
+  local c; c=$(computer "$1"); [[ -n $c ]] || { echo "unknown computer"; return; }
+  local label os host ip online open state
+  label=$(jq -r .label <<<"$c"); os=$(jq -r .os <<<"$c"); host=$(jq -r .host <<<"$c"); ip=$(jq -r .ip <<<"$c")
+  online=$(jq -r .online <<<"$c"); open=$(jq -r .open <<<"$c")
+  state=offline; [[ $online == true ]] && state=online; [[ $open == true ]] && state=connected
+  local manual hidden; manual=$(jq -r .manual <<<"$c"); hidden=$(jq -r .hidden <<<"$c")
+  [[ $hidden == true ]] && state="hidden (not shown in the bar or Super+R)"
+  line() { printf '  %s%-13s%s %s\n' "$dim" "$1" "$rst" "$2"; }
+  printf '\n  %s%s%s   %s\n\n' "$bold" "$label" "$rst" "$state"
+  if [[ $manual == true ]]; then line "address" "$host  ${dim}(added by you, not on Tailscale)${rst}"; else line "host" "$host  ($ip)"; fi
+  line "system" "$os"
+  case $os in
+    windows) line "client" "$(eff "$host" client freerdp)"
+             line "user" "$(eff "$host" user '(asks on first connect)')"
+             line "password" "$(pw_saved "$host" && echo 'saved in your keyring' || echo 'not saved yet')"
+             line "UI scale" "$(eff "$host" scale '200% (your monitor scale)')" ;;
+    macos)   line "client" "$(eff "$host" client vnc)"
+             line "user" "$(eff "$host" user '(asks on first connect)')"
+             line "password" "$(pw_saved "$host" && echo 'saved in your keyring' || echo 'not saved yet')"
+             line "screen fit" "$(eff "$host" fit auto)"
+             line "command key" "$(eff "$host" cmd ctrl)"
+             line "match display" "$(eff "$host" mac_display on)"
+             line "display size" "$(eff "$host" mac_size 'closest to the window')" ;;
+    *)       line "client" "$(eff "$host" client ssh)" ;;
+  esac
+  line "workspace" "$host"
+  line "log" "remote-desktop-$host.log"
+  printf '\n  %s(set) yours   (default) built-in%s\n' "$dim" "$rst"
+  printf '  %sEnter connects · ? lists every key%s\n' "$dim" "$rst"
+}
+
+config() { local id; for id in $(status | jq -r '.[].id'); do show "$id"; done; }
+
+help() {
+  cat <<EOF
+
+  remote-manage: your remote computers
+
+  NORMAL MODE
+    j / k          move down / up            g / G   top / bottom
+    Enter          connect (opens its workspace)
+    d              disconnect (closes the window; the computer's own session keeps running)
+    e              edit settings             p       set or change the password
+    t              test the saved login      f       star (pin to the top)
+    a              add a computer that is not on Tailscale (address, system, user)
+    h              hide / show a computer (hidden ones leave the bar and Super+R)
+    x              remove: forgets the password and settings; for a computer you added,
+                   it removes the computer itself
+    M              Mac display (size, restore)
+    r              refresh status            q / Esc quit
+    / or i         filter by typing; Esc returns to normal mode
+
+  The list shows every computer on your Tailscale. Settings are optional:
+  everything has a default, and the preview marks what you changed.
+
+  Press q to close.
+EOF
+}
+
+# ---------- actions -------------------------------------------------------------------------------
+pause() { read -rsn1 -p "  Press any key..." _; echo; }
+pick() {  # pick HEADER CURRENT option...  -> prints choice
+  local header="$1" current="$2"; shift 2
+  printf '%s\n' "$@" | gum choose --header "$header" --cursor "> " --selected "$current" --height 14
+}
+
+mac_modes() {  # mac_modes HOST USER -> lines "WxH"
+  ssh -o BatchMode=yes -o ConnectTimeout=6 "$2@$1" '~/.local/bin/mac-display list' 2>/dev/null | awk '{print $1}'
+}
+
+pick_mac_size() {
+  local id="$1" c host user cur sel modes
+  c=$(computer "$id"); host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c")
+  [[ -n $user ]] || { echo "  Set the user first (p)."; pause; return; }
+  echo "  Asking the Mac for its display sizes..."
+  modes=$(mac_modes "$host" "$user")
+  [[ -n $modes ]] || { echo "  Could not read the Mac's modes (is the Mac on and the helper installed? connect once)."; pause; return; }
+  cur=$(ov_get "$host" mac_size)
+  sel=$( { echo "default (closest to the window)"; echo "$modes"; } | gum choose --header "Mac display size (bigger number = smaller interface)" --cursor "> " --selected "${cur:-default (closest to the window)}" --height 14) || return
+  if [[ $sel == default* ]]; then ov_del "$host" mac_size; else ov_set "$host" mac_size "$sel"; fi
+  if [[ $(jq -r .open <<<"$(computer "$id")") == true && $sel != default* ]]; then
+    w=${sel%x*}; h=${sel#*x}
+    ssh -o BatchMode=yes -o ConnectTimeout=6 "$user@$host" "~/.local/bin/mac-display set $w $h" 2>/dev/null && echo "  Applied now."
+  fi
+}
+
+edit() {
+  local id="$1" c os label host user v choice
+  while :; do
+    c=$(computer "$id"); [[ -n $c ]] || return
+    os=$(jq -r .os <<<"$c"); label=$(jq -r .label <<<"$c"); host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c")
+    local items=("Name" "User")
+    [[ $(jq -r .manual <<<"$c") == true ]] && items+=("System")
+    case $os in
+      windows) items+=("Client" "UI scale") ;;
+      macos)   items+=("Client" "Screen fit" "Command key" "Display size" "Match display on/off") ;;
+      *)       items+=("Client") ;;
+    esac
+    items+=("Reset to defaults" "Done")
+    choice=$(printf '%s\n' "${items[@]}" | gum choose --header "Edit $label" --cursor "> " --height 14) || return
+    case $choice in
+      Name)  v=$(gum input --value "$label" --prompt "Name > ") && [[ -n $v ]] && ov_set "$host" label "$v" ;;
+      User)  v=$(gum input --value "$user" --prompt "User > ") && [[ -n $v ]] && ov_set "$host" user "$v" ;;
+      System)
+        v=$(pick "What system is it?" "$os" windows macos linux) || continue
+        ov_set "$host" os "$v" ;;
+      Client)
+        local opts=(freerdp remmina ssh); [[ $os == macos ]] && opts=(vnc remmina ssh); [[ $os == linux ]] && opts=(ssh)
+        v=$(pick "Client" "$(ov_get "$host" client)" default "${opts[@]}") || continue
+        if [[ $v == default ]]; then ov_del "$host" client; else ov_set "$host" client "$v"; fi ;;
+      "UI scale")
+        v=$(pick "Windows UI scale (percent)" "$(ov_get "$host" scale)" default 100 125 150 175 200 225 250 300) || continue
+        if [[ $v == default ]]; then ov_del "$host" scale; else ov_set "$host" scale "$v"; fi ;;
+      "Screen fit")
+        v=$(pick "Fit the Mac screen to the window" "$(ov_get "$host" fit)" default auto contain cover stretch) || continue
+        if [[ $v == default ]]; then ov_del "$host" fit; else ov_set "$host" fit "$v"; fi ;;
+      "Command key")
+        v=$(pick "Which key acts as the Mac's Command key" "$(ov_get "$host" cmd)" default ctrl alt none) || continue
+        if [[ $v == default ]]; then ov_del "$host" cmd; else ov_set "$host" cmd "$v"; fi ;;
+      "Display size") pick_mac_size "$id" ;;
+      "Match display on/off")
+        v=$(pick "Change the Mac's display while connected?" "$(ov_get "$host" mac_display)" on off) || continue
+        if [[ $v == on ]]; then ov_del "$host" mac_display; else ov_set "$host" mac_display off; fi ;;
+      "Reset to defaults")
+        gum confirm "Reset every setting of $label to its default?" && ov_reset "$host" ;;
+      Done) return ;;
+    esac
+  done
+}
+
+test_login() {
+  local id="$1" c host user os pw out rc
+  c=$(computer "$id"); host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c"); os=$(jq -r .os <<<"$c")
+  case $os in windows|macos) ;; *) echo "  Nothing to test (uses your SSH keys)."; pause; return ;; esac
+  pw=$(secret-tool lookup service omarchy-remote name "$host" 2>/dev/null)
+  [[ -n $pw && -n $user ]] || { echo "  No saved login yet. Press p to set one."; pause; return; }
+  gum confirm "This makes ONE login attempt on $host. Continue?" || return
+  echo "  Checking..."
+  if [[ $os == macos ]]; then
+    printf '%s\n' "$pw" | timeout 30 omarchy-vnc --host "$host" --user "$user" --check >/dev/null 2>&1; rc=$?
+    case $rc in 0) echo "  ${green}Login accepted.${rst}" ;; 2) echo "  Login rejected: wrong user name or password." ;; *) echo "  Could not reach it (is Screen Sharing on?)." ;; esac
+  else
+    out=$(printf '%s\n' "/v:$host" "/u:$user" "/p:$pw" /cert:tofu "/auth-pkg-list:!kerberos" +auth-only | timeout 25 sdl-freerdp3 /args-from:stdin 2>&1)
+    if grep -q LOGON_FAILURE <<<"$out"; then echo "  Login rejected: wrong user name or password."
+    elif grep -qE 'CONNECT_FAILED.*0x0002000[0-9A-F]|connection (refused|timed out)|DNS' <<<"$out"; then echo "  Could not reach it."
+    else echo "  ${green}Login accepted.${rst}"; fi
+  fi
+  unset pw; pause
+}
+
+add_device() {
+  local host os label user
+  echo
+  echo "  Add a computer that is not on Tailscale."
+  host=$(gum input --prompt "  Address > " --placeholder "host name or IP, e.g. 192.168.1.50 or pc.local") || return
+  host=${host,,}; host=${host// /}
+  [[ -n $host ]] || return
+  [[ $host =~ ^[a-z0-9._-]+$ ]] || { echo "  Use only letters, digits, dots, dashes and underscores."; pause; return; }
+  if jq -e --arg h "$host" 'any(.[]; ((.host // "") | ascii_downcase) == $h)' "$CONF" >/dev/null || status | jq -e --arg h "$host" 'any(.[]; .host == $h)' >/dev/null; then
+    echo "  That one is already in the list."; pause; return
+  fi
+  os=$(printf '%s\n' windows macos linux | gum choose --header "What system is it?" --cursor "> ") || return
+  label=$(gum input --prompt "  Name > " --value "$host") || return; [[ -n $label ]] || label=$host
+  user=""; if [[ $os != linux ]]; then user=$(gum input --prompt "  User name > " --placeholder "login name on that computer") || return; fi
+  ov_write --arg h "$host" --arg l "$label" --arg o "$os" --arg u "$user" \
+    '. + [ ({host: $h, manual: true, os: $o, label: $l} + (if $u != "" then {user: $u} else {} end)) ]' || { echo "  Could not save."; pause; return; }
+  fresh
+  echo "  Added $label."
+  if [[ $os != linux ]] && gum confirm "Set its password now?"; then remote-desktop-setup "$host"; fi
+}
+
+hide_toggle() {
+  local id="$1" c host
+  c=$(computer "$id"); host=$(jq -r .host <<<"$c"); [[ -n $host ]] || return
+  if [[ $(ov_get "$host" hidden) == true ]]; then ov_del "$host" hidden; else ov_set "$host" hidden true; fi
+}
+
+forget() {
+  local id="$1" c host label ans what
+  c=$(computer "$id"); host=$(jq -r .host <<<"$c"); label=$(jq -r .label <<<"$c")
+  what="the saved password and settings of $label"
+  [[ $(jq -r .manual <<<"$c") == true ]] && what="$label (the device you added, its password and settings)"
+  ans=$(gum input --prompt "  Type 'yes' to remove $what > ") || return
+  [[ $ans == yes ]] || { echo "  Cancelled."; sleep 0.6; return; }
+  secret-tool clear service omarchy-remote name "$host" 2>/dev/null
+  ov_reset "$host"
+  echo "  Removed."; sleep 0.6
+}
+
+mac_menu() {
+  local id="$1" c host user os choice
+  c=$(computer "$id"); host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c"); os=$(jq -r .os <<<"$c")
+  [[ $os == macos ]] || { echo "  Only for Macs."; pause; return; }
+  [[ -n $user ]] || { echo "  Connect once first so the user is known (press p)."; pause; return; }
+  choice=$(printf '%s\n' "Show the current display mode" "Choose a display size" "Restore the original display now" "Back" | gum choose --header "Mac display" --cursor "> ") || return
+  case $choice in
+    Show*)    ssh -o BatchMode=yes -o ConnectTimeout=6 "$user@$host" '~/.local/bin/mac-display current' 2>/dev/null | sed 's/^/  /' || echo "  Could not reach the Mac."; pause ;;
+    Choose*)  pick_mac_size "$id"; pause ;;
+    Restore*) ssh -o BatchMode=yes -o ConnectTimeout=6 "$user@$host" '~/.local/bin/mac-display restore' 2>/dev/null | sed 's/^/  /' || echo "  Could not reach the Mac."; pause ;;
+  esac
+}
+
+# ---------- entry points --------------------------------------------------------------------------
+interactive() {
+  command -v fzf >/dev/null 2>&1 || { echo "remote-manage needs fzf:  omarchy pkg add fzf"; exit 1; }
+  command -v gum >/dev/null 2>&1 || { echo "remote-manage needs gum:  omarchy pkg add gum"; exit 1; }
+  command -v remote-desktop-status >/dev/null 2>&1 || { echo "omarchy-remote is not installed (run install.sh)"; exit 1; }
+  local keys="j,k,g,G,e,p,t,f,x,h,a,d,M,r,q,?,i"
+  local esc_action='[[ $FZF_INPUT_STATE == hidden ]] && echo abort || echo "hide-input+clear-query+disable-search+rebind('"$keys"')"'
+  # cache-first: the cached list shows at once, live status replaces it a moment later
+  rows | fzf --ansi --delimiter=$'\t' --with-nth=2 --no-sort --disabled --no-input --ghost 'type / to filter' \
+      --layout=reverse --height=100% --border=rounded --border-label ' Remote computers ' --info=hidden --pointer='▌' --highlight-line \
+      --padding='1,2' --prompt='' \
+      --footer $' ↵ connect   d disconnect   a add   e edit\n p password   t test   f star   h hide   x remove\n M Mac display   r refresh   / filter   ? help   q quit' --footer-border=line \
+      --preview "$SELF show {1}" --preview-window 'right,48%,border-left,<110(down,50%,border-top)' \
+      --bind "start:reload($SELF rows-fresh)" \
+      --bind 'j:down,k:up,g:first,G:last,ctrl-d:half-page-down,ctrl-u:half-page-up' \
+      --bind "enter:execute-silent($SELF connect {1})+abort" \
+      --bind "e:execute($SELF edit {1})+reload($SELF rows)+refresh-preview" \
+      --bind "p:execute($SELF password {1})+reload($SELF rows-fresh)+refresh-preview" \
+      --bind "t:execute($SELF test {1})" \
+      --bind "f:execute-silent($SELF star {1})+reload($SELF rows)" \
+      --bind "x:execute($SELF forget {1})+reload($SELF rows)+refresh-preview" \
+      --bind "a:execute($SELF add)+reload($SELF rows-fresh)+refresh-preview" \
+      --bind "h:execute-silent($SELF hide {1})+reload($SELF rows)+refresh-preview" \
+      --bind "d:execute-silent($SELF disconnect {1})+reload($SELF rows-fresh)+refresh-preview" \
+      --bind "M:execute($SELF mac {1})+refresh-preview" \
+      --bind "r:reload($SELF rows-fresh)+refresh-preview" \
+      --bind "?:execute($SELF help | gum pager)" \
+      --bind "q:abort" \
+      --bind "/:show-input+enable-search+unbind($keys)" \
+      --bind "i:show-input+enable-search+unbind($keys)" \
+      --bind "esc:transform:$esc_action"
+}
+
+case "${1:-}" in
+  "")            interactive ;;
+  rows)          rows ;;
+  rows-fresh)    fresh; rows ;;
+  list)          fresh; rows | cut -f2- | sed 's/\x1b\[[0-9;]*m//g' ;;
+  show)          show "${2:-}" ;;
+  config)        fresh; config ;;
+  help)          help ;;
+  edit)          edit "${2:-}" ;;
+  password)      remote-desktop-setup "${2:-}" ;;
+  test)          test_login "${2:-}" ;;
+  forget)        forget "${2:-}" ;;
+  mac)           mac_menu "${2:-}" ;;
+  disconnect)    remote-desktop --disconnect "${2:-}" ;;
+  add)           add_device ;;
+  hide)          hide_toggle "${2:-}" ;;
+  star)          if grep -qxF "${2:-}" "$STARS"; then grep -vxF "${2:-}" "$STARS" > "$STARS.t"; mv "$STARS.t" "$STARS"; else echo "${2:-}" >> "$STARS"; fi ;;
+  connect)       setsid -f remote-desktop "${2:-}" >/dev/null 2>&1 ;;
+  -h|--help)     sed -n '2,13p' "$0" ;;
+  *)             echo "unknown command: $1" >&2; exit 2 ;;
+esac

@@ -1,0 +1,194 @@
+#!/bin/bash
+# omarchy-remote: developed by JeoCrypto
+# Switch to a remote computer's workspace, opening the connection first if needed.
+# Usage: remote-desktop <computer>               (Tailscale machine name or its label)
+#        remote-desktop --disconnect <computer>  (close its window; the computer's session keeps running)
+set -uo pipefail
+
+# --- disconnect: close the computer's window; its own session keeps running --------------------------
+if [[ ${1:-} == --disconnect ]]; then
+  dkey="${2:-}"
+  dc=$(remote-desktop-status --all | jq -c --arg k "${dkey,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
+  [[ -n $dc ]] || { omarchy notification send -u critical "Remote" "Unknown computer '$dkey'"; exit 1; }
+  dhost=$(jq -r .host <<<"$dc"); dlabel=$(jq -r .label <<<"$dc")
+  read -r daddr dpid < <(hyprctl clients -j | jq -r --arg h "$dhost" '[.[] | select(.workspace.name == $h)] | first | "\(.address // "") \(.pid // "")"')
+  if [[ -z ${daddr:-} ]]; then omarchy notification send "$dlabel is not open" "Nothing to disconnect."; exit 0; fi
+  hyprctl dispatch "hl.dsp.window.close({ window = \"address:$daddr\" })" >/dev/null 2>&1
+  for _ in $(seq 1 16); do
+    sleep 0.25
+    hyprctl clients -j | jq -e --arg a "$daddr" 'any(.[]; .address == $a)' >/dev/null || break
+  done
+  # a client that ignores the close request is stopped
+  if hyprctl clients -j | jq -e --arg a "$daddr" 'any(.[]; .address == $a)' >/dev/null && [[ -n ${dpid:-} ]]; then kill "$dpid" 2>/dev/null; fi
+  omarchy notification send "$dlabel disconnected" "The session keeps running on the computer. Click its chip to reconnect."
+  exit 0
+fi
+
+key="${1:-}"
+c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
+[[ -n $c ]] || { omarchy notification send -u critical "Remote" "Unknown computer '$key'"; exit 1; }
+
+label=$(jq -r .label <<<"$c"); host=$(jq -r .host <<<"$c"); client=$(jq -r .client <<<"$c")
+user=$(jq -r .user <<<"$c"); title=$(jq -r .title <<<"$c"); cmdmode=$(jq -r '.cmd // ""' <<<"$c"); fitmode=$(jq -r '.fit // ""' <<<"$c"); scalepct=$(jq -r '.scale // ""' <<<"$c"); os=$(jq -r .os <<<"$c"); macdisp=$(jq -r '.mac_display // ""' <<<"$c"); macsize=$(jq -r '.mac_size // ""' <<<"$c"); manual=$(jq -r '.manual // false' <<<"$c"); online=$(jq -r .online <<<"$c"); open=$(jq -r .open <<<"$c")
+class="omarchy-remote-$host"
+log="${XDG_RUNTIME_DIR:-/tmp}/remote-desktop-$host.log"
+
+focus_ws() { hyprctl dispatch "hl.dsp.focus({ workspace = \"name:$host\" })" >/dev/null 2>&1; }
+
+# Already open: just switch to it.
+if [[ $open == true ]]; then focus_ws; exit 0; fi
+if [[ $online != true ]]; then
+  # Tailscale's status flag can lag (e.g. the machine lost its control-plane link but is still reachable): ping to be sure.
+  if [[ $manual == true ]] || ! tailscale ping --c 1 --timeout 4s "$host" >/dev/null 2>&1; then
+    omarchy notification send "$label is offline" "$([[ $manual == true ]] && echo "Nothing answers at $host right now." || echo "It isn't reachable on Tailscale right now.")"
+    exit 1
+  fi
+fi
+
+# No gaps on this workspace: the remote desktop fills the area under the bar.
+# Remember the host so ~/.config/hypr/remote.lua can re-declare the rule after a reload or restart.
+state="$HOME/.local/state/omarchy-remote/hosts"; mkdir -p "${state%/*}"
+grep -qxF "$host" "$state" 2>/dev/null || echo "$host" >> "$state"
+hyprctl eval "hl.workspace_rule({ workspace = \"name:$host\", gaps_in = 0, gaps_out = 0 })" >/dev/null 2>&1
+
+# Go to the computer's workspace first, so the new window opens right there.
+focus_ws
+
+# Find a window by class (and optionally exact title) and print its address.
+find_window() {
+  hyprctl clients -j 2>/dev/null | jq -r --arg c "$1" --arg t "${2:-}" \
+    '[.[] | select(.class == $c and ($t == "" or .title == $t))] | first | .address // empty'
+}
+
+# Put a window on the computer's workspace, fullscreen (used for clients Hyprland can't match by class).
+place_window() {   # place_window <address> <fullscreen|tiled>
+  local addr="$1" mode="${2:-tiled}" ws fs
+  read -r ws fs < <(hyprctl clients -j | jq -r --arg a "$addr" '.[] | select(.address == $a) | "\(.workspace.name) \(.fullscreen)"')
+  [[ $ws == "$host" ]] || hyprctl dispatch "hl.dsp.window.move({ workspace = \"name:$host\", window = \"address:$addr\" })" >/dev/null 2>&1
+  if [[ $mode == fullscreen && ${fs:-0} == 0 ]]; then
+    hyprctl dispatch "hl.dsp.focus({ window = \"address:$addr\" })" >/dev/null 2>&1
+    hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen" })' >/dev/null 2>&1
+  elif [[ $mode == tiled ]]; then
+    hyprctl dispatch "hl.dsp.focus({ window = \"address:$addr\" })" >/dev/null 2>&1
+    [[ ${fs:-0} != 0 ]] && hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "fullscreen" })' >/dev/null 2>&1   # toggles it off
+    # FreeRDP opens floating with dynamic resolution; make it a normal tiled window.
+    if hyprctl clients -j | jq -e --arg a "$addr" '.[] | select(.address == $a and .floating == true)' >/dev/null; then
+      hyprctl dispatch 'hl.dsp.window.float({ action = "disable" })' >/dev/null 2>&1
+    fi
+  fi
+  focus_ws
+}
+
+wait_for() {  # wait_for <class> [title]  -> prints address
+  local a
+  for _ in $(seq 1 60); do
+    a=$(find_window "$1" "${2:-}"); [[ -n $a ]] && { echo "$a"; return 0; }
+    sleep 0.5
+  done
+  return 1
+}
+
+# --- macOS: make the Mac's display match this window, restore it when you disconnect ---------------
+# Apple's VNC server can't resize the Mac's desktop, so the helper (mac-display, built on the Mac from
+# mac-display.c with Apple's own tools) switches the display to the HiDPI mode closest to the window.
+# Changes are session-only on the Mac. Disable per computer with "mac_display": "off".
+mac_ssh() { ssh -o BatchMode=yes -o ConnectTimeout=6 "$user@$host" "$@"; }
+
+ensure_mac_helper() {
+  mac_ssh 'test -x ~/.local/bin/mac-display' 2>/dev/null && return 0
+  local src
+  src="$HOME/.local/share/omarchy-remote/mac-display.c"
+  [[ -r $src ]] || return 1
+  mac_ssh 'mkdir -p ~/.local/bin ~/.cache ~/.local/share/omarchy-remote' 2>/dev/null || return 1
+  scp -q -o BatchMode=yes "$src" "$user@$host:.local/share/omarchy-remote/mac-display.c" 2>/dev/null || return 1
+  mac_ssh 'clang -O2 -framework CoreGraphics -framework CoreFoundation -o ~/.local/bin/mac-display ~/.local/share/omarchy-remote/mac-display.c' >/dev/null 2>&1
+}
+
+mac_display_match() {
+  ensure_mac_helper || return 1
+  local mw mh msc rt rb lw lh
+  read -r mw mh msc rt rb < <(hyprctl monitors -j 2>/dev/null | jq -r '[.[] | select(.focused)] | first | "\(.width) \(.height) \(.scale) \(.reserved[1]) \(.reserved[3])"')
+  : "${mw:=1920}" "${mh:=1080}" "${msc:=1}" "${rt:=0}" "${rb:=0}"
+  lw=$(awk -v w="$mw" -v s="$msc" 'BEGIN { printf "%d", w / s }'); lh=$(awk -v h="$mh" -v s="$msc" -v a="$rt" -v b="$rb" 'BEGIN { printf "%d", h / s - a - b }')
+  if [[ $macsize =~ ^([0-9]+)x([0-9]+)$ ]]; then
+    mac_ssh "~/.local/bin/mac-display set ${BASH_REMATCH[1]} ${BASH_REMATCH[2]}" 2>/dev/null   # explicit "mac_size"
+  else
+    mac_ssh "~/.local/bin/mac-display best $lw $lh" 2>/dev/null
+  fi
+}
+
+case "$client" in
+  freerdp)
+    # Render the remote desktop at this monitor's real pixel size and scale (crisp, 1:1 in fullscreen).
+    read -r mw mh msc < <(hyprctl monitors -j 2>/dev/null | jq -r '[.[] | select(.focused)] | first | "\(.width) \(.height) \(.scale)"')
+    : "${mw:=1920}" "${mh:=1080}" "${msc:=1}"
+    lw=$(awk -v w="$mw" -v s="$msc" 'BEGIN { printf "%d", w / s }'); lh=$(awk -v h="$mh" -v s="$msc" 'BEGIN { printf "%d", h / s }')   # /size is in logical units
+    # Windows UI scale: this monitor's scale (200% here), snapped to a value Windows accepts.
+    # Override per computer with "scale": 250 in remote-computers.json.
+    pct=$(awk -v s="$msc" -v o="$scalepct" 'BEGIN { p = (o != "") ? o + 0 : int(s * 100 + 0.5); n = split("100 125 150 175 200 225 250 300 350 400 450 500", a, " "); best = a[1]; for (i = 1; i <= n; i++) if (p >= a[i]) best = a[i]; print best }')
+    pw=$(secret-tool lookup service omarchy-remote name "$host" 2>/dev/null)
+    if [[ -z $pw || -z $user ]]; then
+      exec omarchy-launch-floating-terminal-with-presentation remote-desktop-setup "$host"
+    fi
+    read -ra extra_args <<<"${REMOTE_FREERDP_ARGS:-}"   # optional extra FreeRDP flags, e.g. REMOTE_FREERDP_ARGS="/log-level:DEBUG"
+    (
+      start=$(date +%s)
+      sdl-freerdp3 /args-from:stdin < <(printf '%s\n' "/v:$host" "/u:$user" "/p:$pw" /cert:tofu "/t:$label" "/wm-class:$class" "/size:${lw}x${lh}" "/scale-desktop:$pct" +dynamic-resolution -grab-keyboard "/kbd:remap:0x15b=0x6f,remap:0x15c=0x6f" ${REMOTE_DEBUG:+"/log-filters:com.freerdp.channels.disp.client:DEBUG,com.freerdp.client.SDL:DEBUG"} /network:auto "/gfx:AVC420:off,AVC444:off" "/auth-pkg-list:!kerberos" "${extra_args[@]}") >"$log" 2>&1
+      rc=$?
+      # A quick failure is a connection problem; a long session ending is just you disconnecting.
+      if (( rc != 0 && rc != 130 && rc != 137 && rc != 143 )) && (( $(date +%s) - start < 20 )); then
+        if grep -q LOGON_FAILURE "$log"; then
+          omarchy notification send -u critical "$label: wrong password" "Run: remote-desktop-setup $host"
+        else
+          omarchy notification send -u critical "$label: connection failed" "$(grep -F '[ERROR]' "$log" | tail -1 | sed 's/^\[[0-9:.]*\] \[[0-9:a-f]*\] //' | cut -c1-120)"
+        fi
+      fi
+    ) >/dev/null 2>&1 &
+    disown; unset pw
+    # The generic Hyprland rule makes it fullscreen; just make sure it landed on this workspace.
+    addr=$(wait_for "$class") && place_window "$addr" tiled
+    ;;
+  vnc)
+    command -v omarchy-vnc >/dev/null 2>&1 || { omarchy notification send -u critical "$label" "omarchy-vnc is not installed (run install.sh from the omarchy-remote folder)"; exit 1; }
+    pw=$(secret-tool lookup service omarchy-remote name "$host" 2>/dev/null)
+    if [[ -z $pw || -z $user ]]; then
+      exec omarchy-launch-floating-terminal-with-presentation remote-desktop-setup "$host"
+    fi
+    mac_changed=0
+    if [[ $os == macos && $macdisp != off ]]; then
+      if out=$(mac_display_match) && [[ $out == switched* ]]; then
+        mac_changed=1
+        omarchy notification send "$label display adjusted" "${out#switched to }  Restored when you disconnect."
+      fi
+    fi
+    (
+      # The password goes through a pipe, never the command line.
+      printf '%s\n' "$pw" | omarchy-vnc --host "$host" --user "$user" --class "$class" --title "$label" --cmd "${cmdmode:-ctrl}" --fit "${fitmode:-auto}" >"$log" 2>&1
+      rc=$?
+      (( mac_changed )) && mac_ssh '~/.local/bin/mac-display restore' >/dev/null 2>&1
+      if (( rc != 0 && rc != 130 && rc != 137 && rc != 143 )); then
+        case $rc in
+          2) omarchy notification send -u critical "$label: wrong password" "Run: remote-desktop-setup $host" ;;
+          3) omarchy notification send -u critical "$label: can't connect" "Is Screen Sharing turned on in the Mac's Sharing settings?" ;;
+          4) omarchy notification send "$label: connection lost" "Click its chip to reconnect." ;;
+        esac
+      fi
+    ) >/dev/null 2>&1 &
+    disown; unset pw
+    addr=$(wait_for "$class") && place_window "$addr" tiled
+    ;;
+  remmina)
+    profile=$(grep -lxE "server=($host)(:[0-9]+)?" "$HOME"/.local/share/remmina/*.remmina 2>/dev/null | head -1)
+    [[ -n $profile ]] || { omarchy notification send -u critical "$label" "No saved Remmina profile for $host"; exit 1; }
+    [[ -n $title ]] || title=$(sed -n 's/^name=//p' "$profile" | head -1)
+    setsid uwsm-app -- remmina -c "$profile" >/dev/null 2>&1 &
+    disown
+    addr=$(wait_for org.remmina.Remmina "$title") && place_window "$addr" fullscreen
+    ;;
+  ssh)
+    setsid omarchy-launch-terminal ssh "${user:+$user@}$host" >/dev/null 2>&1 &
+    disown
+    ;;
+  *) omarchy notification send -u critical "Remote" "Unknown client '$client' for $label"; exit 1 ;;
+esac
+exit 0
