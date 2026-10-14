@@ -1,21 +1,36 @@
+<div align="center">
+
 # omarchy-remote
 
 **One-click remote desktops for [Omarchy](https://omarchy.org), built on FreeRDP and Tailscale.**
 
+![Omarchy](https://img.shields.io/badge/Omarchy-plugin-5b8def) ![Windows](https://img.shields.io/badge/Windows-RDP-0078d4) ![macOS](https://img.shields.io/badge/macOS-VNC-999999) ![Linux](https://img.shields.io/badge/Linux-SSH-e95420) ![License](https://img.shields.io/badge/license-MIT%20%2B%20GPL--2.0%2B-green)
+
 *Developed by **JeoCrypto**.*
+
+</div>
 
 Every Windows, Mac or Linux computer on your Tailscale network shows up in the top bar next to your workspaces
 and in a `Super + R` picker. Click one and its screen opens full size on its own workspace, like switching to
 workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you back.
 
-- **Zero setup for new machines.** Join a computer to your tailnet and it appears by itself.
-- **Windows** uses FreeRDP's own window. The remote desktop is sized to your monitor's real pixels, so it is sharp
-  and resizes with the window.
-- **macOS** uses `omarchy-vnc`, a tiny viewer included here (about 30 KB, built on libvncclient and SDL3), with
-  Apple's normal login, a two-way clipboard, and an optional helper that matches the Mac's display to your window.
-- **Linux** opens an SSH session in a terminal.
-- **Passwords** live in your keyring, never in a file, log or command line.
-- Omarchy shortcuts keep working inside a remote desktop (`Super` never reaches the remote machine).
+## Contents
+
+[Features](#features) · [Requirements](#requirements) · [Install](#install) · [Use](#use) · [The manager](#the-manager-super--shift--r) ·
+[Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
+[Keeping Windows reachable](#keeping-windows-computers-reachable) · [Security](#security-and-privacy) ·
+[Troubleshooting](#troubleshooting) · [Development](#development) · [Credits](#credits-and-licenses)
+
+## Features
+
+| | |
+|---|---|
+| **Zero setup for new machines** | Join a computer to your tailnet and it appears by itself. |
+| **Windows** | FreeRDP's own window, sized to your monitor's real pixels: sharp, and it resizes with the window. |
+| **macOS** | `omarchy-vnc`, a tiny viewer included here (about 30 KB, libvncclient + SDL3): Apple login, two-way clipboard, optional display matching. |
+| **Linux** | An SSH session in a terminal. |
+| **Passwords** | Kept in your keyring, never in a file, log or command line. |
+| **Omarchy shortcuts keep working** | `Super` never reaches the remote machine. |
 
 > This is a wrapper around existing tools, not a new RDP implementation. The protocol work is done by
 > [FreeRDP](https://www.freerdp.com) (Windows) and [libvncclient](https://libvnc.github.io) (Mac).
@@ -34,7 +49,7 @@ omarchy pkg add freerdp libsecret jq openssh gcc make pkgconf sdl3 libvncserver
 ## Install
 
 ```
-git clone <this repository> omarchy-remote && cd omarchy-remote
+git clone https://github.com/JeoCrypto/omarchy-remote.git && cd omarchy-remote
 ./install.sh --dry-run     # see exactly what it will do
 ./install.sh
 ```
@@ -63,7 +78,7 @@ If the check says the login was rejected, nothing is saved. Repeated failures ca
 
 ## The manager (`Super + Shift + R`)
 
-A keyboard-driven screen, in the spirit of [tmax](https://github.com/theo-kirby/tmax): an fzf list of your computers
+A keyboard-driven screen, in the spirit of tmax: an fzf list of your computers
 with status glyphs (`●` connected, `○` online, `·` offline, `★` starred), a preview pane that shows each computer's
 **effective settings** (what you set, and what is just the built-in default), and gum menus to change them.
 
@@ -202,6 +217,10 @@ make test       # headless login checks against a local test server (right/wrong
 
 `test/testserver.c` is a small libvncserver server that prints the input it receives; `omarchy-vnc --selftest`
 sends synthetic mouse, key and clipboard events to it.
+
+## Contributing
+
+Issues and pull requests are welcome at <https://github.com/JeoCrypto/omarchy-remote>. Please run `make test` first.
 
 ## Credits and licenses
 
