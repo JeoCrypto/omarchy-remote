@@ -95,6 +95,7 @@ Remove everything with `./uninstall.sh` (add `--purge` to also delete your compu
 | | |
 |---|---|
 | **Super + R** | Pick a computer (type to filter, arrows, Enter) |
+| **→ on a computer** (in `Super + R`) | Its tmux sessions: open, create, kill |
 | **Bar chip** | Click a computer. Dim = offline, bright = online, lit = connected |
 | **Super + F** | Fullscreen toggle. Normal windows behave as before; remote windows fill the monitor without losing sharpness |
 | **Super + Shift + R** | Open the manager (below) |
@@ -116,7 +117,7 @@ with status glyphs (`●` connected, `○` online, `·` offline, `★` starred),
 |---|---|
 | `j` `k` `g` `G` | Move |
 | `Enter` | Connect |
-| `T` | **tmux**: list, open or create a session on the computer |
+| `T` | **tmux**: open, create or kill sessions on the computer |
 | `d` | **Disconnect** (closes the window; the computer's session keeps running) |
 | `a` | **Add** a computer that is not on Tailscale (address, system, name, user, then its password) |
 | `e` | Edit: name, user, client, UI scale, Mac fit, Command key, Mac display size, reset |
@@ -142,8 +143,12 @@ nothing appears twice.
 - **Click an SSH computer** (or press `Enter` on it in the manager): a terminal opens full size on its own workspace
   and runs `ssh -t <host>` with `tmux new-session -A -s main`, so you land in the same tmux session every time.
   If tmux is not installed on the other side you get a plain login shell, with a one-line note.
-- **`T` in the manager** lists the tmux sessions on that computer (Mac, Linux or SSH host). Pick one, or create a
-  new one. For a computer that is already open as a desktop, the session opens as an extra terminal next to it.
+- **In `Super + R`**, press `→` on a Mac, Linux or SSH computer to see its tmux sessions. `Enter` opens one, the
+  **New session** row creates one (type the name first), `Ctrl + X` kills the selected session and `Ctrl + Shift + X`
+  kills them all. Killing needs a second press to confirm; `←` or `Esc` goes back.
+- **`T` in the manager** does the same with menus: open, create, kill one, or kill all. For a computer that is
+  already open as a desktop, the session opens as an extra terminal next to it.
+- From a script: `remote-sessions [list|kill|kill-all] <computer> [session]`.
 - **Disconnect** closes the window; the tmux session keeps running on the computer, so you pick up exactly where you
   were. Right-click a chip, `Ctrl + D` in `Super + R`, or `d` in the manager closes every window of that workspace.
 - Settings per computer (in the manager under `e`, or in `remote-computers.json`): `"tmux": "off"` for a plain shell,

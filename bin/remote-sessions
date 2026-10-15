@@ -1,14 +1,34 @@
 #!/bin/bash
 # omarchy-remote: developed by JeoCrypto
-# List the tmux sessions on a computer, one per line:  name<TAB>windows<TAB>attached
-#   remote-sessions <computer>      (Tailscale machine name, ssh alias or label)
-# Exit codes: 0 listed (maybe none), 3 could not reach it over ssh, 4 unknown computer.
+# tmux sessions on a computer, over ssh (key login).
+#
+#   remote-sessions [list] <computer>          one line per session:  name<TAB>windows<TAB>attached
+#   remote-sessions kill <computer> <session>  end one session
+#   remote-sessions kill-all <computer>        end every session (stops that computer's tmux server)
+#
+# <computer> is a Tailscale machine name, an ssh alias or a label.
+# Exit codes: 0 done (a list may be empty), 3 could not reach it over ssh, 4 unknown computer, 2 bad usage.
 set -uo pipefail
-key="${1:-}"
+
+verb=list
+case "${1:-}" in list|kill|kill-all) verb="$1"; shift ;; esac
+key="${1:-}"; sess="${2:-}"
+[[ -n $key ]] || { echo "usage: remote-sessions [list|kill|kill-all] <computer> [session]" >&2; exit 2; }
+if [[ $verb == kill ]]; then [[ $sess =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad session name" >&2; exit 2; }; fi
+
 c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
 [[ -n $c ]] || { echo "unknown computer: $key" >&2; exit 4; }
 host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c"); alias=$(jq -r '.ssh // ""' <<<"$c")
 target="$alias"; [[ -n $target ]] || target="${user:+$user@}$host"
-out=$(ssh -o BatchMode=yes -o ConnectTimeout=6 "$target" "export PATH=\"\$PATH:/opt/homebrew/bin:/usr/local/bin\"; tmux list-sessions -F '#{session_name}	#{session_windows}	#{session_attached}' 2>/dev/null; true"); rc=$?
+
+# Homebrew (macOS) and /usr/local are not on the PATH of a plain ssh session.
+pre='export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; '
+case $verb in
+  list)     rcmd="${pre}tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}' 2>/dev/null; true" ;;   # tmux turns a tab in -F into '_', so use '|'
+  kill)     rcmd="${pre}tmux kill-session -t '$sess' 2>/dev/null; true" ;;
+  kill-all) rcmd="${pre}tmux kill-server 2>/dev/null; true" ;;
+esac
+out=$(ssh -o BatchMode=yes -o ConnectTimeout=6 "$target" "$rcmd" 2>/dev/null); rc=$?
 (( rc == 0 )) || exit 3
-printf '%s\n' "$out" | sed '/^$/d'
+[[ $verb == list ]] && printf '%s\n' "$out" | sed -E '/^$/d; s/\|([0-9]+)\|([0-9]+)$/\t\1\t\2/'
+exit 0

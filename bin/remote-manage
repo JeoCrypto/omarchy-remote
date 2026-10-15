@@ -117,7 +117,7 @@ help() {
     h              hide / show a computer (hidden ones leave the bar and Super+R)
     x              remove: forgets the password and settings; for a computer you added,
                    it removes the computer itself
-    T              tmux: pick or create a session on the computer (Mac, Linux, ssh hosts)
+    T              tmux: open, create or kill sessions on the computer (Mac, Linux, ssh hosts)
     M              Mac display (size, restore)
     r              refresh status            q / Esc quit
     / or i         filter by typing; Esc returns to normal mode
@@ -282,23 +282,34 @@ mac_menu() {
 }
 
 tmux_menu() {
-  local id="$1" c os out rc choice name label
+  local id="$1" c os out rc choice name label act
   c=$(computer "$id"); os=$(jq -r .os <<<"$c"); label=$(jq -r .label <<<"$c")
   [[ $os == windows ]] && { echo "  tmux is for Mac, Linux and ssh computers."; pause; return; }
-  echo "  Asking $label for its tmux sessions..."
-  out=$(remote-sessions "$id"); rc=$?
-  (( rc == 0 )) || { echo "  Could not reach $label over ssh (key login needed: ssh-copy-id)."; pause; return; }
-  choice=$( { [[ -n $out ]] && awk -F'\t' '{ printf "%s  (%s window%s%s)\n", $1, $2, ($2 == 1 ? "" : "s"), ($3 > 0 ? ", attached elsewhere" : "") }' <<<"$out"; echo "+ New session"; echo "Back"; } \
-    | gum choose --header "tmux on $label" --cursor "> " --height 14) || return
-  case $choice in
-    Back) return ;;
-    "+ New session")
-      name=$(gum input --prompt "  Session name > " --placeholder "e.g. work") || return
-      [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "  Use letters, digits, dots, dashes and underscores."; pause; return; } ;;
-    *) name=${choice%% *} ;;
-  esac
-  setsid -f remote-desktop --session "$name" "$id" >/dev/null 2>&1
-  echo "  Opening $name..."; sleep 0.5
+  while :; do
+    echo "  Asking $label for its tmux sessions..."
+    out=$(remote-sessions list "$id"); rc=$?
+    (( rc == 0 )) || { echo "  Could not reach $label over ssh (key login needed: ssh-copy-id)."; pause; return; }
+    choice=$( { [[ -n $out ]] && awk -F'\t' '{ printf "%s  (%s window%s%s)\n", $1, $2, ($2 == 1 ? "" : "s"), ($3 > 0 ? ", attached elsewhere" : "") }' <<<"$out"
+                echo "+ New session"; [[ -n $out ]] && echo "- Kill all sessions"; echo "Back"; } \
+      | gum choose --header "tmux on $label" --cursor "> " --height 14) || return
+    case $choice in
+      Back) return ;;
+      "+ New session")
+        name=$(gum input --prompt "  Session name > " --placeholder "e.g. work") || continue
+        [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "  Use letters, digits, dots, dashes and underscores."; pause; continue; }
+        setsid -f remote-desktop --session "$name" "$id" >/dev/null 2>&1
+        echo "  Opening $name..."; sleep 0.5; return ;;
+      "- Kill all sessions")
+        gum confirm "Kill EVERY tmux session on $label? Running programs in them stop." && remote-sessions kill-all "$id" ;;
+      *)
+        name=${choice%% *}
+        act=$(printf '%s\n' "Open" "Kill this session" "Back" | gum choose --header "$name on $label" --cursor "> ") || continue
+        case $act in
+          Open) setsid -f remote-desktop --session "$name" "$id" >/dev/null 2>&1; echo "  Opening $name..."; sleep 0.5; return ;;
+          Kill*) gum confirm "Kill session '$name' on $label? Running programs in it stop." && remote-sessions kill "$id" "$name" ;;
+        esac ;;
+    esac
+  done
 }
 
 tmux_pick() {  # pick a computer, then its tmux session (used by the Omarchy menu: Remote > tmux sessions)

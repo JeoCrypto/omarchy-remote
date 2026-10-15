@@ -41,6 +41,10 @@ ids=$(jq -r 'map(.id) | sort | join(",")' <<<"$out")
 [[ $ids == "extra,other,srv" ]] && echo "ok   ssh hosts listed, Tailscale duplicate merged" || { echo "FAIL ssh ids: $ids"; fail=1; }
 [[ $(jq -r '.[] | select(.id == "srv") | .ssh' <<<"$out") == srvalias ]] && echo "ok   alias attached to its Tailscale machine" || { echo "FAIL alias"; fail=1; }
 [[ $(jq -r '.[] | select(.id == "extra") | "\(.os) \(.user)"' <<<"$out") == "ssh bob" ]] && echo "ok   ssh-only host has os ssh and its user" || { echo "FAIL ssh-only fields"; fail=1; }
+# --- remote-sessions: argument checks and unknown computer (no ssh needed) ---------------------------
+check "bad session name"      2 env PATH="$tmp:$PWD/bin:$PATH" REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" bin/remote-sessions kill srv "a b"
+check "missing computer"      2 env PATH="$tmp:$PWD/bin:$PATH" bin/remote-sessions list
+check "unknown computer"      4 env PATH="$tmp:$PWD/bin:$PATH" REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" bin/remote-sessions list nosuchmachine
 rm -rf "$tmp"
 (( fail )) && echo "some checks failed" || echo "all checks passed"
 exit $fail

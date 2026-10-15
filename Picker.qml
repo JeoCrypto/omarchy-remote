@@ -21,6 +21,16 @@ Item {
   property bool cursorActive: true
   property bool loaded: false
   property bool missingHelpers: false
+
+  // tmux sessions of one computer ("sessions" mode, opened with the right arrow)
+  property string mode: "computers"
+  property string sessHost: ""
+  property string sessLabel: ""
+  property var sessions: []
+  property bool sessLoading: false
+  property string sessError: ""
+  property string pendingKill: ""     // "" | a session name | "*" (all): waiting for the second press
+  property string notice: ""
   property var computers: []
 
   // Same surface tokens as the Omarchy menu, so every theme styles this too.
@@ -58,6 +68,9 @@ Item {
 
   function open(payloadJson) {
     root.opened = true
+    root.mode = "computers"
+    root.pendingKill = ""
+    root.notice = ""
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = true
@@ -80,12 +93,103 @@ Item {
   }
 
   function refresh() {
+    if (root.mode === "sessions") return
     if (!statusProcess.running) statusProcess.running = true
+  }
+
+  function say(text) { root.notice = text; noticeTimer.restart() }
+
+  // ---- tmux sessions -------------------------------------------------------------------------------
+  function enterSessions(index) {
+    if (root.mode !== "computers" || index < 0 || index >= displayModel.count) return
+    var row = displayModel.get(index)
+    if (row.kind !== "computer") return
+    if (row.os === "windows") { root.say("tmux is for Mac, Linux and ssh computers"); return }
+    if (!row.online) { root.say(row.label + " is offline"); return }
+    root.mode = "sessions"
+    root.sessHost = row.cid
+    root.sessLabel = row.label
+    root.sessions = []
+    root.sessError = ""
+    root.pendingKill = ""
+    root.filterText = ""
+    root.selectedIndex = 0
+    root.loadSessions()
+    root.rebuild()
+  }
+
+  function leaveSessions() {
+    root.mode = "computers"
+    root.pendingKill = ""
+    root.filterText = ""
+    root.selectedIndex = 0
+    root.refresh()
+    root.rebuild()
+  }
+
+  function loadSessions() {
+    root.sessLoading = true
+    sessProc.command = ["remote-sessions", "list", root.sessHost]
+    sessProc.running = true
+  }
+
+  function launchSession(name) {
+    var host = root.sessHost
+    root.dismiss()
+    Quickshell.execDetached(["remote-desktop", "--session", String(name), String(host)])
+  }
+
+  function confirmKill(target) {
+    if (root.pendingKill === target) {
+      root.pendingKill = ""
+      killProc.command = target === "*" ? ["remote-sessions", "kill-all", root.sessHost]
+                                        : ["remote-sessions", "kill", root.sessHost, target]
+      killProc.running = true
+    } else {
+      root.pendingKill = target
+    }
+  }
+
+  function killIndex(index, all) {
+    if (root.mode !== "sessions") return
+    if (all) { if (root.sessions.length > 0) root.confirmKill("*"); return }
+    if (index < 0 || index >= displayModel.count) return
+    var row = displayModel.get(index)
+    if (row.kind === "session") root.confirmKill(row.cid)
+    else if (row.kind === "killall") root.confirmKill("*")
+  }
+
+  function rebuildSessions() {
+    var q = root.filterText.toLowerCase()
+    var typed = root.filterText.trim()
+    displayModel.clear()
+    function add(kind, cid, glyph, label, sub, badge) {
+      displayModel.append({ kind: kind, cid: cid, label: label, host: "", os: "", ip: "", online: true, isOpen: false,
+                            glyph: glyph, sub: sub, badge: badge })
+    }
+    if (root.sessLoading) add("info", "", "󰔟", "Asking " + root.sessLabel + "…", "", "")
+    else if (root.sessError !== "") add("info", "", "󰀦", root.sessError, "", "")
+    var exact = false
+    for (var i = 0; i < root.sessions.length; i++) {
+      var s = root.sessions[i]
+      if (s.name === typed) exact = true
+      if (q !== "" && s.name.toLowerCase().indexOf(q) === -1) continue
+      add("session", s.name, "󰆍", s.name, s.windows + (s.windows === "1" ? " window" : " windows"),
+          root.pendingKill === s.name ? "press ⌃X again" : (parseInt(s.attached) > 0 ? "attached" : "detached"))
+    }
+    add("new", "", "󰐕", typed !== "" && !exact ? "New session “" + typed + "”" : "New session (type a name)", "", "")
+    if (root.sessions.length > 0)
+      add("killall", "", "󰆴", "Kill all sessions", "stops tmux on " + root.sessLabel, root.pendingKill === "*" ? "press again" : "")
+    if (root.selectedIndex >= displayModel.count) root.selectedIndex = displayModel.count - 1
+    if (root.selectedIndex < 0) root.selectedIndex = 0
+    root.cursorActive = true
+    Qt.callLater(function() { resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain) })
   }
 
   function rank(c) { return c.open ? 0 : (c.online ? 1 : 2) }
 
   function rebuild() {
+    if (root.mode === "sessions") { root.rebuildSessions(); return }
     var keepId = ""
     if (displayModel.count > 0 && root.selectedIndex >= 0 && root.selectedIndex < displayModel.count)
       keepId = displayModel.get(root.selectedIndex).cid
@@ -109,8 +213,11 @@ Item {
       var r = rows[j]
       if (r.id === keepId) keepIndex = j
       displayModel.append({
-        cid: String(r.id), label: String(r.label), host: String(r.host), os: String(r.os),
-        ip: String(r.ip || ""), online: r.online === true, isOpen: r.open === true
+        kind: "computer", cid: String(r.id), label: String(r.label), host: String(r.host), os: String(r.os),
+        ip: String(r.ip || ""), online: r.online === true, isOpen: r.open === true,
+        glyph: root.osIcon(String(r.os)),
+        sub: String(r.host) + (r.ip ? "  ·  " + String(r.ip) : ""),
+        badge: (r.open === true ? "󱓻 " : "") + root.statusLabel(r)
       })
     }
 
@@ -128,11 +235,13 @@ Item {
   function move(delta) {
     if (displayModel.count === 0) return
     root.cursorActive = true
+    root.pendingKill = ""
     root.selectedIndex = (root.selectedIndex + delta + displayModel.count) % displayModel.count
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
 
   function setFilter(next) {
+    root.pendingKill = ""
     root.filterText = next
     root.selectedIndex = 0
     root.rebuild()
@@ -141,11 +250,22 @@ Item {
   function activateIndex(index) {
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
+    if (root.mode === "sessions") {
+      if (row.kind === "session") root.launchSession(row.cid)
+      else if (row.kind === "killall") root.confirmKill("*")
+      else if (row.kind === "new") {
+        var name = root.filterText.trim()
+        if (/^[A-Za-z0-9._-]+$/.test(name)) root.launchSession(name)
+        else root.say("Type a session name: letters, digits, dot, dash, underscore")
+      }
+      return
+    }
     root.dismiss()
     Quickshell.execDetached(["remote-desktop", String(row.cid)])
   }
 
   function disconnectIndex(index) {
+    if (root.mode !== "computers") return
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
     root.dismiss()
@@ -167,6 +287,39 @@ Item {
       if (root.opened) root.rebuild()
     }
   }
+
+  Process {
+    id: sessProc
+    running: false
+    stdout: StdioCollector { id: sessStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.sessLoading = false
+      if (exitCode === 0) {
+        var out = []
+        var lines = String(sessStdout.text || "").split("\n")
+        for (var i = 0; i < lines.length; i++) {
+          var f = lines[i].split("\t")
+          if (f.length >= 3 && f[0] !== "") out.push({ name: f[0], windows: f[1], attached: f[2] })
+        }
+        root.sessions = out
+        root.sessError = ""
+      } else {
+        root.sessions = []
+        root.sessError = exitCode === 3 ? "Can't reach " + root.sessLabel + " over ssh (needs key login)" : "Could not list the sessions"
+      }
+      if (root.opened && root.mode === "sessions") root.rebuild()
+    }
+  }
+
+  Process {
+    id: killProc
+    running: false
+    onExited: function(exitCode) {
+      if (root.mode === "sessions") { root.loadSessions(); root.rebuild() }
+    }
+  }
+
+  Timer { id: noticeTimer; interval: 2500; repeat: false; onTriggered: root.notice = "" }
 
   // Keep the list live while it's open (a computer coming online, a session starting).
   Timer {
@@ -216,8 +369,24 @@ Item {
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) {
-            if (root.filterText) root.setFilter("")
+            if (root.pendingKill !== "") root.pendingKill = ""
+            else if (root.filterText) root.setFilter("")
+            else if (root.mode === "sessions") root.leaveSessions()
             else root.dismiss()
+            if (root.mode === "sessions") root.rebuild()
+            event.accepted = true
+          } else if (event.key === Qt.Key_Right && root.mode === "computers" && root.filterText === "") {
+            root.enterSessions(root.selectedIndex)
+            event.accepted = true
+          } else if (event.key === Qt.Key_T && event.modifiers === Qt.ControlModifier && root.mode === "computers") {
+            root.enterSessions(root.selectedIndex)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Left && root.mode === "sessions" && root.filterText === "") {
+            root.leaveSessions()
+            event.accepted = true
+          } else if (event.key === Qt.Key_X && (event.modifiers & Qt.ControlModifier) && root.mode === "sessions") {
+            root.killIndex(root.selectedIndex, (event.modifiers & Qt.ShiftModifier) !== 0)
+            root.rebuild()
             event.accepted = true
           } else if (event.key === Qt.Key_D && event.modifiers === Qt.ControlModifier) {
             root.disconnectIndex(root.selectedIndex)
@@ -265,7 +434,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.filterText || "Connect to…"
+            text: root.filterText || (root.mode === "sessions" ? "tmux on " + root.sessLabel + "…" : "Connect to…")
             color: root.foreground
             opacity: root.filterText ? 1 : 0.58
             font.family: root.fontFamily
@@ -297,6 +466,10 @@ Item {
               required property string ip
               required property bool online
               required property bool isOpen
+              required property string kind
+              required property string glyph
+              required property string sub
+              required property string badge
 
               readonly property bool hasCursor: root.cursorActive && index === root.selectedIndex
 
@@ -314,7 +487,7 @@ Item {
 
                 Text {
                   textFormat: Text.PlainText
-                  text: root.osIcon(row.os)
+                  text: row.glyph
                   color: row.hasCursor ? root.selectedText : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.display
@@ -339,7 +512,8 @@ Item {
                   Text {
                     textFormat: Text.PlainText
                     width: parent.width
-                    text: row.host + (row.ip !== "" ? "  ·  " + row.ip : "")
+                    text: row.sub
+                    visible: row.sub !== ""
                     color: root.foreground
                     opacity: 0.55
                     font.family: root.fontFamily
@@ -350,7 +524,7 @@ Item {
 
                 Text {
                   textFormat: Text.PlainText
-                  text: (row.isOpen ? "󱓻 " : "") + root.statusLabel(row)
+                  text: row.badge
                   color: row.isOpen ? root.selectedText : root.foreground
                   opacity: row.isOpen ? 1 : 0.6
                   font.family: root.fontFamily
@@ -409,7 +583,9 @@ Item {
           textFormat: Text.PlainText
           width: parent.width
           height: root.footerHeight
-          text: "↵ connect     ⌃D disconnect     esc close"
+          text: root.notice !== "" ? root.notice
+                : root.mode === "sessions" ? (root.pendingKill !== "" ? "⌃X again to confirm · esc cancels" : "↵ open     ⌃X kill     ⌃⇧X kill all     ← back")
+                : "↵ connect     → tmux     ⌃D disconnect     esc close"
           color: root.foreground
           opacity: 0.4
           font.family: root.fontFamily
