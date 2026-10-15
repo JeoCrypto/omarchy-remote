@@ -94,14 +94,31 @@ Remove everything with `./uninstall.sh` (add `--purge` to also delete your compu
 
 | | |
 |---|---|
-| **Super + R** | Pick a computer (type to filter, arrows, Enter) |
-| **→ on a computer** (in `Super + R`) | Its tmux sessions: open, create, kill |
+| **Super + R** | The picker, with one key per action (below) |
 | **Bar chip** | Click a computer. Dim = offline, bright = online, lit = connected |
 | **Super + F** | Fullscreen toggle. Normal windows behave as before; remote windows fill the monitor without losing sharpness |
 | **Super + Shift + R** | Open the manager (below) |
-| **Right-click a chip, or Ctrl + D in `Super + R`** | Disconnect: closes the window; the computer's own session keeps running |
+| **Right-click a chip, or `d` in `Super + R`** | Disconnect: closes the window; the computer's own session keeps running |
 | **Super + Tab / Super + 1-5** | Leave the remote workspace. The session stays connected |
 | **Super + W** | Close the remote window (same as disconnecting) |
+
+### The `Super + R` picker
+
+Same style as the manager: one key per action, and the keys are always shown at the bottom.
+
+| Key | Computers | tmux sessions (after `t`) |
+|---|---|---|
+| `↑` `↓` or `j` `k` | Move | Move |
+| `Enter` | Connect | Open the session |
+| `d` | Disconnect | |
+| `t` or `→` | Show its tmux sessions | |
+| `n` | | New session (type the name, `Enter`) |
+| `x` / `X` | | Kill the session / kill all (asks `y / n`) |
+| `m` | Open the manager | |
+| `a` | Add a computer | |
+| `/` | Filter by typing (`Esc` stops) | Filter |
+| `←` or `Esc` | | Back |
+| `q` or `Esc` | Close | Close |
 
 **The first time** you open a Windows or Mac computer, a small terminal asks for the user name and password
 (twice). It checks the login once, then saves the password in your keyring. After that it is one click.
@@ -143,9 +160,8 @@ nothing appears twice.
 - **Click an SSH computer** (or press `Enter` on it in the manager): a terminal opens full size on its own workspace
   and runs `ssh -t <host>` with `tmux new-session -A -s main`, so you land in the same tmux session every time.
   If tmux is not installed on the other side you get a plain login shell, with a one-line note.
-- **In `Super + R`**, press `→` on a Mac, Linux or SSH computer to see its tmux sessions. `Enter` opens one, the
-  **New session** row creates one (type the name first), `Ctrl + X` kills the selected session and `Ctrl + Shift + X`
-  kills them all. Killing needs a second press to confirm; `←` or `Esc` goes back.
+- **In `Super + R`**, press `t` (or `→`) on a Mac, Linux or SSH computer to see its tmux sessions: `Enter` opens one, `n`
+  creates one, `x` kills one and `X` kills them all (each asks `y / n`). See the key table above.
 - **`T` in the manager** does the same with menus: open, create, kill one, or kill all. For a computer that is
   already open as a desktop, the session opens as an extra terminal next to it.
 - From a script: `remote-sessions [list|kill|kill-all] <computer> [session]`.

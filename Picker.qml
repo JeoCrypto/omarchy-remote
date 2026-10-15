@@ -29,7 +29,9 @@ Item {
   property var sessions: []
   property bool sessLoading: false
   property string sessError: ""
-  property string pendingKill: ""     // "" | a session name | "*" (all): waiting for the second press
+  property string pendingKill: ""     // "" | a session name | "*" (all): waiting for y/n
+  property string inputMode: "normal" // normal | filter (/) | name (new tmux session) | confirm (y/n)
+  property string nameText: ""
   property string notice: ""
   property var computers: []
 
@@ -46,7 +48,7 @@ Item {
   property int contentMargin: Style.spacing.panelPadding
   property int contentSpacing: Style.spacing.md
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
-  property int footerHeight: Math.max(Style.space(22), Style.font.caption + Style.spacing.md)
+  property int footerHeight: Math.max(Style.space(36), Style.font.caption * 2 + Style.spacing.md * 2)
   property int rowHeight: Math.max(Style.space(54), Style.font.heading + Style.font.caption + Style.spacing.md * 2)
   property int maxRows: 7
   property int cardWidth: Math.min(Style.space(460), panel.width - Style.gapsOut * 2)
@@ -69,6 +71,8 @@ Item {
   function open(payloadJson) {
     root.opened = true
     root.mode = "computers"
+    root.inputMode = "normal"
+    root.nameText = ""
     root.pendingKill = ""
     root.notice = ""
     root.filterText = ""
@@ -120,6 +124,7 @@ Item {
 
   function leaveSessions() {
     root.mode = "computers"
+    root.inputMode = "normal"
     root.pendingKill = ""
     root.filterText = ""
     root.selectedIndex = 0
@@ -139,24 +144,68 @@ Item {
     Quickshell.execDetached(["remote-desktop", "--session", String(name), String(host)])
   }
 
-  function confirmKill(target) {
-    if (root.pendingKill === target) {
-      root.pendingKill = ""
-      killProc.command = target === "*" ? ["remote-sessions", "kill-all", root.sessHost]
-                                        : ["remote-sessions", "kill", root.sessHost, target]
-      killProc.running = true
-    } else {
-      root.pendingKill = target
-    }
+  // y/n confirmation: pendingKill holds what would be killed ("*" = every session)
+  function askKill(target) {
+    root.pendingKill = target
+    root.inputMode = "confirm"
+  }
+
+  function doKill() {
+    var target = root.pendingKill
+    root.pendingKill = ""
+    root.inputMode = "normal"
+    if (target === "") return
+    killProc.command = target === "*" ? ["remote-sessions", "kill-all", root.sessHost]
+                                      : ["remote-sessions", "kill", root.sessHost, target]
+    killProc.running = true
+  }
+
+  function cancelInput() {
+    root.pendingKill = ""
+    root.nameText = ""
+    root.inputMode = "normal"
+    if (root.mode === "sessions") root.rebuild()
   }
 
   function killIndex(index, all) {
     if (root.mode !== "sessions") return
-    if (all) { if (root.sessions.length > 0) root.confirmKill("*"); return }
+    if (all) { if (root.sessions.length > 0) root.askKill("*"); return }
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
-    if (row.kind === "session") root.confirmKill(row.cid)
-    else if (row.kind === "killall") root.confirmKill("*")
+    if (row.kind === "session") root.askKill(row.cid)
+    else if (row.kind === "killall") root.askKill("*")
+    else root.say("Move to a session first")
+  }
+
+  function submitName() {
+    var name = root.nameText.trim()
+    if (/^[A-Za-z0-9._-]+$/.test(name)) { root.nameText = ""; root.inputMode = "normal"; root.launchSession(name) }
+    else root.say("Use letters, digits, dot, dash and underscore")
+  }
+
+  function runTool(argv) {
+    root.dismiss()
+    Quickshell.execDetached(argv)
+  }
+
+  function headerText() {
+    if (root.inputMode === "filter") return "/ " + root.filterText + "▏"
+    if (root.inputMode === "name") return "New session name: " + root.nameText + "▏"
+    if (root.inputMode === "confirm")
+      return root.pendingKill === "*" ? "Kill ALL sessions on " + root.sessLabel + "?  y / n"
+                                      : "Kill session “" + root.pendingKill + "”?  y / n"
+    if (root.filterText !== "") return "/ " + root.filterText
+    return root.mode === "sessions" ? "tmux on " + root.sessLabel : "Remote computers"
+  }
+
+  function legend() {
+    if (root.notice !== "") return root.notice
+    if (root.inputMode === "filter") return "<b>type</b> to filter   <b>↵</b> open   <b>esc</b> stop filtering"
+    if (root.inputMode === "name") return "<b>↵</b> create and open   <b>esc</b> cancel"
+    if (root.inputMode === "confirm") return "<b>y</b> yes, kill   <b>any other key</b> cancels"
+    if (root.mode === "sessions")
+      return "<b>↵</b> open   <b>n</b> new   <b>x</b> kill   <b>X</b> kill all   <b>/</b> filter   <b>←</b> back   <b>q</b> close"
+    return "<b>↵</b> connect   <b>d</b> disconnect   <b>t</b> tmux   <b>m</b> manage   <b>a</b> add   <b>/</b> filter   <b>q</b> close"
   }
 
   function rebuildSessions() {
@@ -175,11 +224,11 @@ Item {
       if (s.name === typed) exact = true
       if (q !== "" && s.name.toLowerCase().indexOf(q) === -1) continue
       add("session", s.name, "󰆍", s.name, s.windows + (s.windows === "1" ? " window" : " windows"),
-          root.pendingKill === s.name ? "press ⌃X again" : (parseInt(s.attached) > 0 ? "attached" : "detached"))
+          parseInt(s.attached) > 0 ? "● attached" : "○ detached")
     }
     add("new", "", "󰐕", typed !== "" && !exact ? "New session “" + typed + "”" : "New session (type a name)", "", "")
     if (root.sessions.length > 0)
-      add("killall", "", "󰆴", "Kill all sessions", "stops tmux on " + root.sessLabel, root.pendingKill === "*" ? "press again" : "")
+      add("killall", "", "󰆴", "Kill all sessions", "stops tmux on " + root.sessLabel, "")
     if (root.selectedIndex >= displayModel.count) root.selectedIndex = displayModel.count - 1
     if (root.selectedIndex < 0) root.selectedIndex = 0
     root.cursorActive = true
@@ -217,7 +266,7 @@ Item {
         ip: String(r.ip || ""), online: r.online === true, isOpen: r.open === true,
         glyph: root.osIcon(String(r.os)),
         sub: String(r.host) + (r.ip ? "  ·  " + String(r.ip) : ""),
-        badge: (r.open === true ? "󱓻 " : "") + root.statusLabel(r)
+        badge: (r.open === true ? "● " : (r.online === true ? "○ " : "· ")) + root.statusLabel(r)
       })
     }
 
@@ -252,7 +301,7 @@ Item {
     var row = displayModel.get(index)
     if (root.mode === "sessions") {
       if (row.kind === "session") root.launchSession(row.cid)
-      else if (row.kind === "killall") root.confirmKill("*")
+      else if (row.kind === "killall") root.askKill("*")
       else if (row.kind === "new") {
         var name = root.filterText.trim()
         if (/^[A-Za-z0-9._-]+$/.test(name)) root.launchSession(name)
@@ -368,50 +417,72 @@ Item {
 
         Keys.priority: Keys.BeforeItem
         Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
-            if (root.pendingKill !== "") root.pendingKill = ""
-            else if (root.filterText) root.setFilter("")
+          var k = event.key
+          var t = event.text || ""
+          var plain = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+          var printable = t.length === 1 && t.charCodeAt(0) >= 32 && t.charCodeAt(0) !== 127 && plain
+          event.accepted = true
+
+          // y / n prompt: only "y" (or Enter) proceeds
+          if (root.inputMode === "confirm") {
+            if (t === "y" || t === "Y" || k === Qt.Key_Return || k === Qt.Key_Enter) root.doKill()
+            else root.cancelInput()
+            return
+          }
+
+          // typing the name of a new tmux session
+          if (root.inputMode === "name") {
+            if (k === Qt.Key_Escape) root.cancelInput()
+            else if (k === Qt.Key_Return || k === Qt.Key_Enter) root.submitName()
+            else if (Util.editsFilter(event, root.nameText)) root.nameText = Util.editedFilter(event, root.nameText)
+            else if (printable && /[A-Za-z0-9._-]/.test(t)) root.nameText += t
+            return
+          }
+
+          // "/" filter: letters are text here, arrows still move
+          if (root.inputMode === "filter") {
+            if (k === Qt.Key_Escape) { root.inputMode = "normal"; root.setFilter("") }
+            else if (k === Qt.Key_Return || k === Qt.Key_Enter) { root.inputMode = "normal"; root.activateIndex(root.selectedIndex) }
+            else if (k === Qt.Key_Up || k === Qt.Key_Backtab) root.move(-1)
+            else if (k === Qt.Key_Down || k === Qt.Key_Tab) root.move(1)
+            else if (Util.editsFilter(event, root.filterText)) root.setFilter(Util.editedFilter(event, root.filterText))
+            else if (printable) root.setFilter(root.filterText + t)
+            if (root.mode === "sessions") root.rebuild()
+            return
+          }
+
+          // normal mode: one key per action
+          var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+          if (k === Qt.Key_Escape || (printable && t === "q")) {
+            if (root.filterText !== "") root.setFilter("")
             else if (root.mode === "sessions") root.leaveSessions()
             else root.dismiss()
-            if (root.mode === "sessions") root.rebuild()
-            event.accepted = true
-          } else if (event.key === Qt.Key_Right && root.mode === "computers" && root.filterText === "") {
-            root.enterSessions(root.selectedIndex)
-            event.accepted = true
-          } else if (event.key === Qt.Key_T && event.modifiers === Qt.ControlModifier && root.mode === "computers") {
-            root.enterSessions(root.selectedIndex)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Left && root.mode === "sessions" && root.filterText === "") {
-            root.leaveSessions()
-            event.accepted = true
-          } else if (event.key === Qt.Key_X && (event.modifiers & Qt.ControlModifier) && root.mode === "sessions") {
-            root.killIndex(root.selectedIndex, (event.modifiers & Qt.ShiftModifier) !== 0)
-            root.rebuild()
-            event.accepted = true
-          } else if (event.key === Qt.Key_D && event.modifiers === Qt.ControlModifier) {
-            root.disconnectIndex(root.selectedIndex)
-            event.accepted = true
-          } else if (Util.editsFilter(event, root.filterText)) {
-            root.setFilter(Util.editedFilter(event, root.filterText))
-            event.accepted = true
-          } else if (event.key === Qt.Key_Up || event.key === Qt.Key_Backtab
-                     || (event.key === Qt.Key_P && event.modifiers === Qt.ControlModifier)
-                     || (event.key === Qt.Key_K && event.modifiers === Qt.ControlModifier)) {
-            root.move(-1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Tab
-                     || (event.key === Qt.Key_N && event.modifiers === Qt.ControlModifier)
-                     || (event.key === Qt.Key_J && event.modifiers === Qt.ControlModifier)) {
+          } else if (k === Qt.Key_Down || (printable && t === "j") || (ctrl && (k === Qt.Key_N || k === Qt.Key_J)) || k === Qt.Key_Tab) {
             root.move(1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+          } else if (k === Qt.Key_Up || (printable && t === "k") || (ctrl && (k === Qt.Key_P || k === Qt.Key_K)) || k === Qt.Key_Backtab) {
+            root.move(-1)
+          } else if (printable && t === "g") {
+            root.selectedIndex = 0; resultList.positionViewAtIndex(0, ListView.Contain)
+          } else if (printable && t === "G") {
+            root.selectedIndex = Math.max(0, displayModel.count - 1); resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+          } else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
             root.activateIndex(root.selectedIndex)
-            event.accepted = true
-          } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127
-                     && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
-            root.setFilter(root.filterText + event.text)
-            event.accepted = true
+          } else if (printable && t === "/") {
+            root.inputMode = "filter"
+          } else if (root.mode === "computers") {
+            if (printable && t === "d") root.disconnectIndex(root.selectedIndex)
+            else if ((printable && (t === "t" || t === "l")) || k === Qt.Key_Right) root.enterSessions(root.selectedIndex)
+            else if (printable && t === "m") root.runTool(["omarchy-launch-tui", "--app-id=org.omarchy.terminal", "remote-manage"])
+            else if (printable && t === "a") root.runTool(["omarchy-launch-floating-terminal-with-presentation", "remote-manage", "add"])
+            else if (printable && t === "r") root.refresh()
+          } else {
+            if (printable && t === "n") { root.nameText = ""; root.inputMode = "name" }
+            else if (printable && t === "x") root.killIndex(root.selectedIndex, false)
+            else if (printable && t === "X") root.killIndex(root.selectedIndex, true)
+            else if (k === Qt.Key_Left || (printable && t === "h")) root.leaveSessions()
+            else if (printable && t === "r") root.loadSessions()
           }
+          if (root.mode === "sessions") root.rebuild()
         }
       }
 
@@ -434,9 +505,10 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: root.filterText || (root.mode === "sessions" ? "tmux on " + root.sessLabel + "…" : "Connect to…")
+            text: root.headerText()
             color: root.foreground
-            opacity: root.filterText ? 1 : 0.58
+            opacity: (root.inputMode !== "normal" || root.filterText) ? 1 : 0.8
+            font.bold: root.inputMode === "normal" && root.filterText === ""
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
@@ -580,14 +652,13 @@ Item {
         }
 
         Text {
-          textFormat: Text.PlainText
+          textFormat: Text.StyledText
           width: parent.width
           height: root.footerHeight
-          text: root.notice !== "" ? root.notice
-                : root.mode === "sessions" ? (root.pendingKill !== "" ? "⌃X again to confirm · esc cancels" : "↵ open     ⌃X kill     ⌃⇧X kill all     ← back")
-                : "↵ connect     → tmux     ⌃D disconnect     esc close"
+          text: root.legend()
+          wrapMode: Text.WordWrap
           color: root.foreground
-          opacity: 0.4
+          opacity: root.notice !== "" ? 0.9 : 0.55
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           horizontalAlignment: Text.AlignHCenter
