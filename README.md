@@ -17,7 +17,7 @@ workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you
 ## Contents
 
 [Features](#features) · [Quick start](#quick-start) · [Requirements](#requirements) · [Install](#install) · [Use](#use) · [The manager](#the-manager-super--shift--r) ·
-[SSH and tmux](#ssh-hosts-and-tmux) · [Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
+[SSH and tmux](#ssh-hosts-and-tmux) · [Omarchy menu](#the-omarchy-menu) · [Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
 [Keeping Windows reachable](#keeping-windows-computers-reachable) · [Security](#security-and-privacy) ·
 [Troubleshooting](#troubleshooting) · [Development](#development) · [Credits](#credits-and-licenses)
 
@@ -149,6 +149,22 @@ nothing appears twice.
 - Settings per computer (in the manager under `e`, or in `remote-computers.json`): `"tmux": "off"` for a plain shell,
   `"session": "work"` for another default session name.
 - Needs key-based SSH login (`ssh-copy-id`), nothing else: no agent or daemon on the remote side except tmux itself.
+  Homebrew and `/usr/local/bin` are added to the remote `PATH`, so tmux is found on a Mac too.
+
+## The Omarchy menu
+
+`Super + Space` > **Remote** gathers everything in one place (the installer adds it to
+`~/.config/omarchy/extensions/omarchy-menu.jsonc`, in a marked block that `uninstall.sh` removes):
+
+| Entry | Does |
+|---|---|
+| Connect to a computer | The `Super + R` picker |
+| tmux sessions | Pick an online Mac, Linux or ssh computer, then open or create a tmux session |
+| Manage computers | The manager (`Super + Shift + R`) |
+| Add a computer | Add one that is not on Tailscale |
+| Disconnect all | Close every remote window (sessions keep running on the computers) |
+| Edit the computer list | Open `remote-computers.json` in your editor |
+| Keys and help | Every key of the manager |
 
 ## Computers that are not on Tailscale
 

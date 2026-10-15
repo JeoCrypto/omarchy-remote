@@ -301,6 +301,15 @@ tmux_menu() {
   echo "  Opening $name..."; sleep 0.5
 }
 
+tmux_pick() {  # pick a computer, then its tmux session (used by the Omarchy menu: Remote > tmux sessions)
+  local labels choice id
+  labels=$(status | jq -r '.[] | select(.os != "windows" and .online and (.hidden | not)) | .label')
+  [[ -n $labels ]] || { echo "  No online Mac, Linux or ssh computer right now."; pause; return; }
+  choice=$(gum choose --header "tmux on which computer?" --cursor "> " --height 14 <<<"$labels") || return
+  id=$(status | jq -r --arg l "$choice" '[.[] | select(.label == $l)] | first | .id')
+  tmux_menu "$id"
+}
+
 # ---------- entry points --------------------------------------------------------------------------
 interactive() {
   command -v fzf >/dev/null 2>&1 || { echo "remote-manage needs fzf:  omarchy pkg add fzf"; exit 1; }
@@ -347,6 +356,7 @@ case "${1:-}" in
   password)      remote-desktop-setup "${2:-}" ;;
   test)          test_login "${2:-}" ;;
   forget)        forget "${2:-}" ;;
+  tmux-pick)     tmux_pick ;;
   tmux)          tmux_menu "${2:-}" ;;
   mac)           mac_menu "${2:-}" ;;
   disconnect)    remote-desktop --disconnect "${2:-}" ;;

@@ -2,9 +2,16 @@
 # omarchy-remote: developed by JeoCrypto
 # Switch to a remote computer's workspace, opening the connection first if needed.
 # Usage: remote-desktop <computer>               (Tailscale machine name or its label)
+#        remote-desktop --disconnect-all         (close every open remote window)
 #        remote-desktop --session NAME <computer>  (open a tmux session on it, in a terminal on its workspace)
 #        remote-desktop --disconnect <computer>  (close its window; the computer's session keeps running)
 set -uo pipefail
+
+# --- disconnect everything --------------------------------------------------------------------------
+if [[ ${1:-} == --disconnect-all ]]; then
+  for did in $(remote-desktop-status --all | jq -r '.[] | select(.open) | .id'); do remote-desktop --disconnect "$did"; done
+  exit 0
+fi
 
 # --- disconnect: close the computer's window; its own session keeps running --------------------------
 if [[ ${1:-} == --disconnect ]]; then
@@ -137,7 +144,7 @@ tmux_window() {
     remote='exec "${SHELL:-sh}" -l'
   else
     : "${sess:=${defsession:-main}}"
-    remote="command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s '$sess' || { echo 'tmux is not installed here; opening a plain shell.'; exec \"\${SHELL:-sh}\" -l; }"
+    remote="export PATH=\"\$PATH:/opt/homebrew/bin:/usr/local/bin\"; command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s '$sess' || { echo 'tmux is not installed here; opening a plain shell.'; exec \"\${SHELL:-sh}\" -l; }"
   fi
   setsid omarchy-launch-tui --app-id="$tclass" ssh -t "$target" "$remote" >/dev/null 2>&1 &
   disown

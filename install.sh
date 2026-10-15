@@ -151,6 +151,37 @@ if (( ! dry )); then
   note "Hyprland accepted the configuration"
 fi
 
+
+# ---- 4b. Omarchy menu ---------------------------------------------------------------------------------
+say "Adding a Remote group to the Omarchy menu"
+MENU="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
+menu_block() { cat <<'EOM'
+  // omarchy-remote: start
+  "remote": {"icon":"󰢹","label":"Remote","aliases":["rdp","ssh","vnc"]},
+  "remote.pick": {"icon":"󰍹","label":"Connect to a computer","description":"Pick a computer from your Tailscale and ssh config (Super+R)","action":"omarchy-shell shell toggle omarchy-remote"},
+  "remote.tmux": {"icon":"󰆍","label":"tmux sessions","description":"Open or create a tmux session on a Mac, Linux or ssh computer","action":"omarchy-launch-floating-terminal-with-presentation remote-manage tmux-pick"},
+  "remote.manage": {"icon":"󰒓","label":"Manage computers","description":"Settings, passwords, hide, star, tests (Super+Shift+R)","action":"omarchy-launch-tui --app-id=org.omarchy.terminal remote-manage"},
+  "remote.add": {"icon":"󰐕","label":"Add a computer","description":"One that is not on Tailscale","action":"omarchy-launch-floating-terminal-with-presentation remote-manage add"},
+  "remote.disconnect": {"icon":"󰅖","label":"Disconnect all","description":"Close every remote window; sessions keep running on the computers","action":"remote-desktop --disconnect-all"},
+  "remote.edit": {"icon":"󰷈","label":"Edit the computer list","description":"~/.config/omarchy/remote-computers.json","action":"omarchy-launch-editor ~/.config/omarchy/remote-computers.json"},
+  "remote.help": {"icon":"󰋗","label":"Keys and help","description":"Every key of the manager","action":"omarchy-launch-floating-terminal-with-presentation bash -c 'remote-manage help | gum pager'"},
+  // omarchy-remote: end
+EOM
+}
+if (( dry )); then
+  note "[dry-run] add the Remote group to $MENU"
+else
+  mkdir -p "$(dirname "$MENU")"; [[ -s $MENU ]] || printf '{\n}\n' > "$MENU"
+  cp -p "$MENU" "$MENU.bak.$stamp"
+  tmp=$(mktemp)
+  # drop an earlier copy of our block, then insert the new one right after the opening brace (every row ends with a
+  # comma, so the file stays valid whatever follows)
+  awk '$0 ~ /\/\/ omarchy-remote: start/{skip=1; next} $0 ~ /\/\/ omarchy-remote: end/{skip=0; next} !skip' "$MENU" > "$tmp"
+  awk -v blk="$(menu_block)" '!done && /^\{/ { print; print blk; done=1; next } { print }' "$tmp" > "$MENU"
+  rm -f "$tmp"
+  note "Menu: Super+Space > Remote"
+fi
+
 # ---- 5. Omarchy shell plugins -----------------------------------------------------------------------
 say "Installing the shell plugin (bar chips + Super+R picker)"
 # earlier builds used other ids; remove them so nothing shows twice

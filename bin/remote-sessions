@@ -9,6 +9,6 @@ c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id ==
 [[ -n $c ]] || { echo "unknown computer: $key" >&2; exit 4; }
 host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c"); alias=$(jq -r '.ssh // ""' <<<"$c")
 target="$alias"; [[ -n $target ]] || target="${user:+$user@}$host"
-out=$(ssh -o BatchMode=yes -o ConnectTimeout=6 "$target" "tmux list-sessions -F '#{session_name}	#{session_windows}	#{session_attached}' 2>/dev/null; true"); rc=$?
+out=$(ssh -o BatchMode=yes -o ConnectTimeout=6 "$target" "export PATH=\"\$PATH:/opt/homebrew/bin:/usr/local/bin\"; tmux list-sessions -F '#{session_name}	#{session_windows}	#{session_attached}' 2>/dev/null; true"); rc=$?
 (( rc == 0 )) || exit 3
 printf '%s\n' "$out" | sed '/^$/d'

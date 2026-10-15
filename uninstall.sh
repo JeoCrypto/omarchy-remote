@@ -46,6 +46,16 @@ for p in omarchy-remote omarchy-remote.chips omarchy-remote.picker; do
   if [[ -d $PLUGINS/$p ]]; then run omarchy plugin remove "$p" --yes || run rm -rf "$PLUGINS/$p"; fi
 done
 
+say "Removing the Remote group from the Omarchy menu"
+MENU="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
+if [[ -f $MENU ]] && grep -q '// omarchy-remote: start' "$MENU"; then
+  if (( dry )); then echo "    [dry-run] remove the Remote group from $MENU"; else
+    cp -p "$MENU" "$MENU.bak.$stamp"; tmp=$(mktemp)
+    awk '/\/\/ omarchy-remote: start/{skip=1; next} /\/\/ omarchy-remote: end/{skip=0; next} !skip' "$MENU" > "$tmp"
+    cat "$tmp" > "$MENU"; rm -f "$tmp"
+  fi
+fi
+
 say "Restoring Hyprland (this also gives Super+F back to Omarchy)"
 remove_block "$HYPR/hyprland.lua" "omarchy-remote"
 remove_block "$HYPR/bindings.lua" "omarchy-remote"
