@@ -24,6 +24,11 @@ Item {
 
   // tmux sessions of one computer ("sessions" mode, opened with the right arrow)
   property string mode: "computers"
+  property string actHost: ""
+  property string actLabel: ""
+  property string actOs: ""
+  property bool actOpen: false
+  property bool actOnline: false
   property string sessHost: ""
   property string sessLabel: ""
   property var sessions: []
@@ -97,39 +102,98 @@ Item {
   }
 
   function refresh() {
-    if (root.mode === "sessions") return
+    if (root.mode !== "computers") return
     if (!statusProcess.running) statusProcess.running = true
   }
 
   function say(text) { root.notice = text; noticeTimer.restart() }
 
   // ---- tmux sessions -------------------------------------------------------------------------------
-  function enterSessions(index) {
+  // computers -> actions (the "more" menu of one computer) -> sessions (its tmux sessions)
+  function enterActions(index) {
     if (root.mode !== "computers" || index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
     if (row.kind !== "computer") return
-    if (row.os === "windows") { root.say("tmux is for Mac, Linux and ssh computers"); return }
-    if (!row.online) { root.say(row.label + " is offline"); return }
+    root.actHost = row.cid
+    root.actLabel = row.label
+    root.actOs = row.os
+    root.actOpen = row.isOpen
+    root.actOnline = row.online
+    root.mode = "actions"
+    root.selectedIndex = 0
+    root.rebuild()
+  }
+
+  function leaveActions() {
+    root.mode = "computers"
+    root.selectedIndex = 0
+    root.refresh()
+    root.rebuild()
+  }
+
+  function enterSessions() {
+    if (!root.actOnline) { root.say(root.actLabel + " is offline"); return }
     root.mode = "sessions"
-    root.sessHost = row.cid
-    root.sessLabel = row.label
+    root.sessHost = root.actHost
+    root.sessLabel = root.actLabel
     root.sessions = []
     root.sessError = ""
     root.pendingKill = ""
-    root.filterText = ""
     root.selectedIndex = 0
     root.loadSessions()
     root.rebuild()
   }
 
   function leaveSessions() {
-    root.mode = "computers"
+    root.mode = "actions"
     root.inputMode = "normal"
     root.pendingKill = ""
-    root.filterText = ""
     root.selectedIndex = 0
-    root.refresh()
     root.rebuild()
+  }
+
+  function actionList() {
+    var l = []
+    var desk = root.actOs === "windows" || root.actOs === "macos"
+    l.push({ id: "connect", key: "c", glyph: "󰍹",
+             label: desk ? (root.actOpen ? "Go to the desktop" : "Connect to the desktop") : (root.actOpen ? "Go to the terminal" : "Open a terminal"),
+             sub: root.actOs === "windows" ? "Remote Desktop (RDP)" : (root.actOs === "macos" ? "Screen Sharing (VNC)" : "ssh, with tmux") })
+    if (desk) l.push({ id: "shell", key: "s", glyph: "󰆍", label: "Open a terminal", sub: "ssh, plain shell" })
+    l.push({ id: "tmux", key: "t", glyph: "󱃖", label: "tmux sessions…",
+             sub: root.actOs === "windows" ? "needs tmux or psmux on that PC" : "open, create or kill" })
+    if (root.actOpen) l.push({ id: "disconnect", key: "d", glyph: "󰅖", label: "Disconnect", sub: "closes the window; sessions keep running" })
+    if (desk) l.push({ id: "password", key: "p", glyph: "󰌆", label: "Set the password", sub: "checks the login once, then saves it in your keyring" })
+    l.push({ id: "hide", key: "h", glyph: "󰈉", label: "Hide this computer", sub: "bring it back in the manager" })
+    l.push({ id: "settings", key: "e", glyph: "󰒓", label: "Settings…", sub: "opens the manager" })
+    return l
+  }
+
+  function rebuildActions() {
+    displayModel.clear()
+    var l = root.actionList()
+    for (var i = 0; i < l.length; i++)
+      displayModel.append({ kind: "action", cid: l[i].id, label: l[i].label, host: "", os: "", ip: "", online: true, isOpen: false,
+                            glyph: l[i].glyph, sub: l[i].sub, badge: l[i].key })
+    if (root.selectedIndex >= displayModel.count) root.selectedIndex = displayModel.count - 1
+    if (root.selectedIndex < 0) root.selectedIndex = 0
+    root.cursorActive = true
+  }
+
+  function runAction(id) {
+    var host = root.actHost
+    if (id === "connect") { root.dismiss(); Quickshell.execDetached(["remote-desktop", host]) }
+    else if (id === "shell") { root.dismiss(); Quickshell.execDetached(["remote-desktop", "--shell", host]) }
+    else if (id === "tmux") root.enterSessions()
+    else if (id === "disconnect") { root.dismiss(); Quickshell.execDetached(["remote-desktop", "--disconnect", host]) }
+    else if (id === "password") root.runTool(["omarchy-launch-floating-terminal-with-presentation", "remote-desktop-setup", host])
+    else if (id === "hide") { Quickshell.execDetached(["remote-manage", "hide", host]); root.say(root.actLabel + " hidden"); root.leaveActions() }
+    else if (id === "settings") root.runTool(["omarchy-launch-tui", "--app-id=org.omarchy.terminal", "remote-manage"])
+  }
+
+  function runActionKey(t) {
+    var l = root.actionList()
+    for (var i = 0; i < l.length; i++) if (l[i].key === t) { root.runAction(l[i].id); return true }
+    return false
   }
 
   function loadSessions() {
@@ -189,28 +253,25 @@ Item {
   }
 
   function headerText() {
-    if (root.inputMode === "filter") return "/ " + root.filterText + "▏"
     if (root.inputMode === "name") return "New session name: " + root.nameText + "▏"
     if (root.inputMode === "confirm")
       return root.pendingKill === "*" ? "Kill ALL sessions on " + root.sessLabel + "?  y / n"
                                       : "Kill session “" + root.pendingKill + "”?  y / n"
-    if (root.filterText !== "") return "/ " + root.filterText
-    return root.mode === "sessions" ? "tmux on " + root.sessLabel : "Remote computers"
+    if (root.mode === "actions") return root.actLabel
+    if (root.mode === "sessions") return "tmux on " + root.sessLabel
+    return root.filterText !== "" ? root.filterText + "▏" : "Search or pick a computer…"
   }
 
   function legend() {
     if (root.notice !== "") return root.notice
-    if (root.inputMode === "filter") return "<b>type</b> to filter   <b>↵</b> open   <b>esc</b> stop filtering"
     if (root.inputMode === "name") return "<b>↵</b> create and open   <b>esc</b> cancel"
     if (root.inputMode === "confirm") return "<b>y</b> yes, kill   <b>any other key</b> cancels"
-    if (root.mode === "sessions")
-      return "<b>↵</b> open   <b>n</b> new   <b>x</b> kill   <b>X</b> kill all   <b>/</b> filter   <b>←</b> back   <b>q</b> close"
-    return "<b>↵</b> connect   <b>d</b> disconnect   <b>t</b> tmux   <b>m</b> manage   <b>a</b> add   <b>/</b> filter   <b>q</b> close"
+    if (root.mode === "actions") return "<b>↵</b> or the key on the right   <b>←</b> back   <b>q</b> close"
+    if (root.mode === "sessions") return "<b>↵</b> open   <b>n</b> new   <b>x</b> kill   <b>X</b> kill all   <b>←</b> back   <b>q</b> close"
+    return "<b>type</b> to search   <b>↵</b> connect   <b>→</b> more   <b>esc</b> close"
   }
 
   function rebuildSessions() {
-    var q = root.filterText.toLowerCase()
-    var typed = root.filterText.trim()
     displayModel.clear()
     function add(kind, cid, glyph, label, sub, badge) {
       displayModel.append({ kind: kind, cid: cid, label: label, host: "", os: "", ip: "", online: true, isOpen: false,
@@ -218,17 +279,14 @@ Item {
     }
     if (root.sessLoading) add("info", "", "󰔟", "Asking " + root.sessLabel + "…", "", "")
     else if (root.sessError !== "") add("info", "", "󰀦", root.sessError, "", "")
-    var exact = false
     for (var i = 0; i < root.sessions.length; i++) {
       var s = root.sessions[i]
-      if (s.name === typed) exact = true
-      if (q !== "" && s.name.toLowerCase().indexOf(q) === -1) continue
       add("session", s.name, "󰆍", s.name, s.windows + (s.windows === "1" ? " window" : " windows"),
-          parseInt(s.attached) > 0 ? "● attached" : "○ detached")
+          (parseInt(s.attached) > 0 ? "● attached" : "○ detached"))
     }
-    add("new", "", "󰐕", typed !== "" && !exact ? "New session “" + typed + "”" : "New session (type a name)", "", "")
+    add("new", "", "󰐕", "New session…", "type a name", "n")
     if (root.sessions.length > 0)
-      add("killall", "", "󰆴", "Kill all sessions", "stops tmux on " + root.sessLabel, "")
+      add("killall", "", "󰆴", "Kill all sessions", "stops tmux on " + root.sessLabel, "X")
     if (root.selectedIndex >= displayModel.count) root.selectedIndex = displayModel.count - 1
     if (root.selectedIndex < 0) root.selectedIndex = 0
     root.cursorActive = true
@@ -239,6 +297,7 @@ Item {
 
   function rebuild() {
     if (root.mode === "sessions") { root.rebuildSessions(); return }
+    if (root.mode === "actions") { root.rebuildActions(); return }
     var keepId = ""
     if (displayModel.count > 0 && root.selectedIndex >= 0 && root.selectedIndex < displayModel.count)
       keepId = displayModel.get(root.selectedIndex).cid
@@ -299,16 +358,14 @@ Item {
   function activateIndex(index) {
     if (index < 0 || index >= displayModel.count) return
     var row = displayModel.get(index)
+    if (root.mode === "actions") { root.runAction(row.cid); return }
     if (root.mode === "sessions") {
       if (row.kind === "session") root.launchSession(row.cid)
       else if (row.kind === "killall") root.askKill("*")
-      else if (row.kind === "new") {
-        var name = root.filterText.trim()
-        if (/^[A-Za-z0-9._-]+$/.test(name)) root.launchSession(name)
-        else root.say("Type a session name: letters, digits, dot, dash, underscore")
-      }
+      else if (row.kind === "new") { root.nameText = ""; root.inputMode = "name" }
       return
     }
+    if (row.kind !== "computer") return
     root.dismiss()
     Quickshell.execDetached(["remote-desktop", String(row.cid)])
   }
@@ -351,7 +408,8 @@ Item {
           if (f.length >= 3 && f[0] !== "") out.push({ name: f[0], windows: f[1], attached: f[2] })
         }
         root.sessions = out
-        root.sessError = ""
+        root.sessError = String(sessStdout.text || "").trim() === "NOTMUX"
+          ? "tmux not installed on " + root.sessLabel + (root.actOs === "windows" ? " (try psmux)" : "") : ""
       } else {
         root.sessions = []
         root.sessError = exitCode === 3 ? "Can't reach " + root.sessLabel + " over ssh (needs key login)" : "Could not list the sessions"
@@ -421,6 +479,9 @@ Item {
           var t = event.text || ""
           var plain = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
           var printable = t.length === 1 && t.charCodeAt(0) >= 32 && t.charCodeAt(0) !== 127 && plain
+          var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+          var down = k === Qt.Key_Down || k === Qt.Key_Tab || (ctrl && (k === Qt.Key_N || k === Qt.Key_J))
+          var up = k === Qt.Key_Up || k === Qt.Key_Backtab || (ctrl && (k === Qt.Key_P || k === Qt.Key_K))
           event.accepted = true
 
           // y / n prompt: only "y" (or Enter) proceeds
@@ -439,47 +500,30 @@ Item {
             return
           }
 
-          // "/" filter: letters are text here, arrows still move
-          if (root.inputMode === "filter") {
-            if (k === Qt.Key_Escape) { root.inputMode = "normal"; root.setFilter("") }
-            else if (k === Qt.Key_Return || k === Qt.Key_Enter) { root.inputMode = "normal"; root.activateIndex(root.selectedIndex) }
-            else if (k === Qt.Key_Up || k === Qt.Key_Backtab) root.move(-1)
-            else if (k === Qt.Key_Down || k === Qt.Key_Tab) root.move(1)
+          if (root.mode === "computers") {
+            // a launcher: just type to search
+            if (k === Qt.Key_Escape) { if (root.filterText !== "") root.setFilter(""); else root.dismiss() }
+            else if (down) root.move(1)
+            else if (up) root.move(-1)
+            else if (k === Qt.Key_Return || k === Qt.Key_Enter) root.activateIndex(root.selectedIndex)
+            else if (k === Qt.Key_Right) root.enterActions(root.selectedIndex)
             else if (Util.editsFilter(event, root.filterText)) root.setFilter(Util.editedFilter(event, root.filterText))
             else if (printable) root.setFilter(root.filterText + t)
-            if (root.mode === "sessions") root.rebuild()
             return
           }
 
-          // normal mode: one key per action
-          var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
-          if (k === Qt.Key_Escape || (printable && t === "q")) {
-            if (root.filterText !== "") root.setFilter("")
-            else if (root.mode === "sessions") root.leaveSessions()
-            else root.dismiss()
-          } else if (k === Qt.Key_Down || (printable && t === "j") || (ctrl && (k === Qt.Key_N || k === Qt.Key_J)) || k === Qt.Key_Tab) {
-            root.move(1)
-          } else if (k === Qt.Key_Up || (printable && t === "k") || (ctrl && (k === Qt.Key_P || k === Qt.Key_K)) || k === Qt.Key_Backtab) {
-            root.move(-1)
-          } else if (printable && t === "g") {
-            root.selectedIndex = 0; resultList.positionViewAtIndex(0, ListView.Contain)
-          } else if (printable && t === "G") {
-            root.selectedIndex = Math.max(0, displayModel.count - 1); resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
-          } else if (k === Qt.Key_Return || k === Qt.Key_Enter) {
-            root.activateIndex(root.selectedIndex)
-          } else if (printable && t === "/") {
-            root.inputMode = "filter"
-          } else if (root.mode === "computers") {
-            if (printable && t === "d") root.disconnectIndex(root.selectedIndex)
-            else if ((printable && (t === "t" || t === "l")) || k === Qt.Key_Right) root.enterSessions(root.selectedIndex)
-            else if (printable && t === "m") root.runTool(["omarchy-launch-tui", "--app-id=org.omarchy.terminal", "remote-manage"])
-            else if (printable && t === "a") root.runTool(["omarchy-launch-floating-terminal-with-presentation", "remote-manage", "add"])
-            else if (printable && t === "r") root.refresh()
-          } else {
+          // actions and sessions: lists with a key on every row
+          if (k === Qt.Key_Escape || k === Qt.Key_Left || (printable && t === "h")) {
+            if (root.mode === "sessions") root.leaveSessions(); else root.leaveActions()
+          } else if (printable && t === "q") root.dismiss()
+          else if (down || (printable && t === "j")) root.move(1)
+          else if (up || (printable && t === "k")) root.move(-1)
+          else if (k === Qt.Key_Return || k === Qt.Key_Enter || k === Qt.Key_Right) root.activateIndex(root.selectedIndex)
+          else if (root.mode === "actions") { if (printable) root.runActionKey(t) }
+          else if (root.mode === "sessions") {
             if (printable && t === "n") { root.nameText = ""; root.inputMode = "name" }
             else if (printable && t === "x") root.killIndex(root.selectedIndex, false)
             else if (printable && t === "X") root.killIndex(root.selectedIndex, true)
-            else if (k === Qt.Key_Left || (printable && t === "h")) root.leaveSessions()
             else if (printable && t === "r") root.loadSessions()
           }
           if (root.mode === "sessions") root.rebuild()
@@ -507,8 +551,8 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: root.headerText()
             color: root.foreground
-            opacity: (root.inputMode !== "normal" || root.filterText) ? 1 : 0.8
-            font.bold: root.inputMode === "normal" && root.filterText === ""
+            opacity: (root.inputMode !== "normal" || root.filterText || root.mode !== "computers") ? 1 : 0.5
+            font.bold: root.mode !== "computers" && root.inputMode === "normal"
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
             elide: Text.ElideRight
@@ -595,12 +639,33 @@ Item {
                 }
 
                 Text {
+                  id: closeBtn
+                  visible: row.kind === "computer" && row.isOpen
+                  textFormat: Text.PlainText
+                  text: "󰅖"
+                  color: row.hasCursor ? root.selectedText : root.foreground
+                  opacity: closeArea.containsMouse ? 1 : 0.5
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.heading
+                  Layout.alignment: Qt.AlignVCenter
+                  MouseArea {
+                    id: closeArea
+                    anchors.fill: parent
+                    anchors.margins: -Style.space(6)
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: { root.selectedIndex = row.index; root.dismiss(); Quickshell.execDetached(["remote-desktop", "--disconnect", row.cid]) }
+                  }
+                }
+
+                Text {
                   textFormat: Text.PlainText
                   text: row.badge
                   color: row.isOpen ? root.selectedText : root.foreground
-                  opacity: row.isOpen ? 1 : 0.6
+                  opacity: row.kind === "action" ? 0.9 : (row.isOpen ? 1 : 0.6)
+                  font.bold: row.kind === "action"
                   font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: row.kind === "action" ? Style.font.heading : Style.font.caption
                   Layout.alignment: Qt.AlignVCenter
                 }
               }

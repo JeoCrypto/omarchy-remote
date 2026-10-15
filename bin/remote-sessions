@@ -3,6 +3,7 @@
 # tmux sessions on a computer, over ssh (key login).
 #
 #   remote-sessions [list] <computer>          one line per session:  name<TAB>windows<TAB>attached
+#                                              (the single line NOTMUX when tmux is not installed there)
 #   remote-sessions kill <computer> <session>  end one session
 #   remote-sessions kill-all <computer>        end every session (stops that computer's tmux server)
 #
@@ -18,16 +19,25 @@ if [[ $verb == kill ]]; then [[ $sess =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad ses
 
 c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
 [[ -n $c ]] || { echo "unknown computer: $key" >&2; exit 4; }
-host=$(jq -r .host <<<"$c"); user=$(jq -r .user <<<"$c"); alias=$(jq -r '.ssh // ""' <<<"$c")
+host=$(jq -r .host <<<"$c"); os=$(jq -r .os <<<"$c"); user=$(jq -r .user <<<"$c"); alias=$(jq -r '.ssh // ""' <<<"$c")
 target="$alias"; [[ -n $target ]] || target="${user:+$user@}$host"
 
 # Homebrew (macOS) and /usr/local are not on the PATH of a plain ssh session.
-pre='export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; '
+pre='export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; command -v tmux >/dev/null 2>&1 || { echo NOTMUX; exit 0; }; '
 case $verb in
   list)     rcmd="${pre}tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}' 2>/dev/null; true" ;;   # tmux turns a tab in -F into '_', so use '|'
   kill)     rcmd="${pre}tmux kill-session -t '$sess' 2>/dev/null; true" ;;
   kill-all) rcmd="${pre}tmux kill-server 2>/dev/null; true" ;;
 esac
+if [[ $os == windows ]]; then
+  # PowerShell on the other side; needs tmux or psmux installed (psmux = a Windows-native tmux)
+  ps='$t = Get-Command tmux, psmux -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $t) { "NOTMUX"; exit 0 }; '
+  case $verb in
+    list)     rcmd="${ps}& \$t.Source list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}' 2>\$null; exit 0" ;;
+    kill)     rcmd="${ps}& \$t.Source kill-session -t '$sess' 2>\$null; exit 0" ;;
+    kill-all) rcmd="${ps}& \$t.Source kill-server 2>\$null; exit 0" ;;
+  esac
+fi
 out=$(ssh -o BatchMode=yes -o ConnectTimeout=6 "$target" "$rcmd" 2>/dev/null); rc=$?
 (( rc == 0 )) || exit 3
 [[ $verb == list ]] && printf '%s\n' "$out" | sed -E '/^$/d; s/\|([0-9]+)\|([0-9]+)$/\t\1\t\2/'

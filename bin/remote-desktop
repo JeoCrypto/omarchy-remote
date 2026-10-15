@@ -2,6 +2,7 @@
 # omarchy-remote: developed by JeoCrypto
 # Switch to a remote computer's workspace, opening the connection first if needed.
 # Usage: remote-desktop <computer>               (Tailscale machine name or its label)
+#        remote-desktop --shell <computer>        (plain ssh terminal on its workspace, no tmux)
 #        remote-desktop --disconnect-all         (close every open remote window)
 #        remote-desktop --session NAME <computer>  (open a tmux session on it, in a terminal on its workspace)
 #        remote-desktop --disconnect <computer>  (close its window; the computer's session keeps running)
@@ -35,7 +36,8 @@ if [[ ${1:-} == --disconnect ]]; then
   exit 0
 fi
 
-session=""
+session=""; plainshell=0
+if [[ ${1:-} == --shell ]]; then plainshell=1; shift; fi
 if [[ ${1:-} == --session ]]; then
   session="${2:-}"; shift 2 || true
   [[ $session =~ ^[A-Za-z0-9._-]+$ ]] || { omarchy notification send -u critical "Remote" "Bad tmux session name '$session'"; exit 1; }
@@ -52,7 +54,7 @@ log="${XDG_RUNTIME_DIR:-/tmp}/remote-desktop-$host.log"
 focus_ws() { hyprctl dispatch "hl.dsp.focus({ workspace = \"name:$host\" })" >/dev/null 2>&1; }
 
 # Already open: just switch to it (unless a tmux session was asked for: that opens another window here).
-if [[ $open == true && -z $session ]]; then focus_ws; exit 0; fi
+if [[ $open == true && -z $session && $plainshell == 0 ]]; then focus_ws; exit 0; fi
 if [[ $online != true ]]; then
   # Tailscale's status flag can lag (e.g. the machine lost its control-plane link but is still reachable): ping to be sure.
   if [[ $manual == true ]] || ! tailscale ping --c 1 --timeout 4s "$host" >/dev/null 2>&1; then
@@ -140,7 +142,16 @@ tmux_window() {
   local sess="${1:-}" target tclass remote
   target="$sshalias"; [[ -n $target ]] || target="${user:+$user@}$host"
   tclass="$class"; [[ $client != ssh ]] && tclass="$class-tmux"
-  if [[ $tmuxmode == off && -z $sess ]]; then
+  if [[ $os == windows ]]; then
+    # OpenSSH on Windows starts PowerShell. tmux does not exist there natively; psmux (a Windows tmux, installed
+    # as "psmux" and "tmux") works if you installed it. Without it you get a plain PowerShell.
+    if [[ $plainshell == 1 || ( $tmuxmode == off && -z $sess ) ]]; then
+      remote='powershell -NoLogo'
+    else
+      : "${sess:=${defsession:-main}}"
+      remote="\$t = Get-Command tmux, psmux -ErrorAction SilentlyContinue | Select-Object -First 1; if (\$t) { & \$t.Source new-session -A -s '$sess' } else { Write-Host 'tmux (psmux) is not installed on this PC; opening a plain PowerShell.'; powershell -NoLogo }"
+    fi
+  elif [[ $plainshell == 1 || ( $tmuxmode == off && -z $sess ) ]]; then
     remote='exec "${SHELL:-sh}" -l'
   else
     : "${sess:=${defsession:-main}}"
@@ -151,7 +162,7 @@ tmux_window() {
   if [[ $client == ssh ]]; then addr=$(wait_for "$tclass") && place_window "$addr" tiled; fi
 }
 
-if [[ -n $session && $client != ssh ]]; then tmux_window "$session"; exit 0; fi
+if [[ ( -n $session || $plainshell == 1 ) && $client != ssh ]]; then tmux_window "$session"; exit 0; fi
 
 case "$client" in
   freerdp)

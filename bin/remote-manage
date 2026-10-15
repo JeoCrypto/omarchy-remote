@@ -289,6 +289,7 @@ tmux_menu() {
     echo "  Asking $label for its tmux sessions..."
     out=$(remote-sessions list "$id"); rc=$?
     (( rc == 0 )) || { echo "  Could not reach $label over ssh (key login needed: ssh-copy-id)."; pause; return; }
+    [[ $out == NOTMUX ]] && { echo "  tmux is not installed on $label$([[ $os == windows ]] && echo " (psmux is the Windows version)")."; pause; return; }
     choice=$( { [[ -n $out ]] && awk -F'\t' '{ printf "%s  (%s window%s%s)\n", $1, $2, ($2 == 1 ? "" : "s"), ($3 > 0 ? ", attached elsewhere" : "") }' <<<"$out"
                 echo "+ New session"; [[ -n $out ]] && echo "- Kill all sessions"; echo "Back"; } \
       | gum choose --header "tmux on $label" --cursor "> " --height 14) || return

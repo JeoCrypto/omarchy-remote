@@ -104,21 +104,15 @@ Remove everything with `./uninstall.sh` (add `--purge` to also delete your compu
 
 ### The `Super + R` picker
 
-Same style as the manager: one key per action, and the keys are always shown at the bottom.
+A launcher in three steps. **Type** to search, press **Enter** to connect, press **→** for everything else.
 
-| Key | Computers | tmux sessions (after `t`) |
-|---|---|---|
-| `↑` `↓` or `j` `k` | Move | Move |
-| `Enter` | Connect | Open the session |
-| `d` | Disconnect | |
-| `t` or `→` | Show its tmux sessions | |
-| `n` | | New session (type the name, `Enter`) |
-| `x` / `X` | | Kill the session / kill all (asks `y / n`) |
-| `m` | Open the manager | |
-| `a` | Add a computer | |
-| `/` | Filter by typing (`Esc` stops) | Filter |
-| `←` or `Esc` | | Back |
-| `q` or `Esc` | Close | Close |
+| Where | Keys |
+|---|---|
+| **Computers** | Type to search · `↑` `↓` move · `Enter` connect · `→` more · click a row to connect · click `✕` on a connected one to disconnect · `Esc` close |
+| **More** (`→`) | Every row shows its key: `c` connect (or go to the open desktop) · `s` plain ssh terminal · `t` tmux sessions · `d` disconnect · `p` set the password · `h` hide · `e` settings (the manager) · `←` back |
+| **tmux sessions** | `Enter` open · `n` new (type the name) · `x` kill (asks `y / n`) · `X` kill all · `←` back |
+
+The key legend is always shown at the bottom. For editing and testing in bulk, use the manager (`Super + Shift + R`).
 
 **The first time** you open a Windows or Mac computer, a small terminal asks for the user name and password
 (twice). It checks the login once, then saves the password in your keyring. After that it is one click.
@@ -134,7 +128,7 @@ with status glyphs (`●` connected, `○` online, `·` offline, `★` starred),
 |---|---|
 | `j` `k` `g` `G` | Move |
 | `Enter` | Connect |
-| `T` | **tmux**: open, create or kill sessions on the computer |
+| `T` | **tmux**: open, create or kill sessions on the computer (Windows needs psmux) |
 | `d` | **Disconnect** (closes the window; the computer's session keeps running) |
 | `a` | **Add** a computer that is not on Tailscale (address, system, name, user, then its password) |
 | `e` | Edit: name, user, client, UI scale, Mac fit, Command key, Mac display size, reset |
@@ -160,8 +154,11 @@ nothing appears twice.
 - **Click an SSH computer** (or press `Enter` on it in the manager): a terminal opens full size on its own workspace
   and runs `ssh -t <host>` with `tmux new-session -A -s main`, so you land in the same tmux session every time.
   If tmux is not installed on the other side you get a plain login shell, with a one-line note.
-- **In `Super + R`**, press `t` (or `→`) on a Mac, Linux or SSH computer to see its tmux sessions: `Enter` opens one, `n`
-  creates one, `x` kills one and `X` kills them all (each asks `y / n`). See the key table above.
+- **In `Super + R`**, press `→` on a computer, then `t`: `Enter` opens a session, `n` creates one, `x` kills one and
+  `X` kills them all (each asks `y / n`).
+- **Windows PCs** have no native tmux. If you install [psmux](https://docs.rs/psmux/latest/pmux) (a Windows tmux, on WinGet
+  and Scoop) the same screens work for them; without it you get a plain PowerShell, and the sessions list says tmux is
+  missing. Not tested on a real PC yet.
 - **`T` in the manager** does the same with menus: open, create, kill one, or kill all. For a computer that is
   already open as a desktop, the session opens as an extra terminal next to it.
 - From a script: `remote-sessions [list|kill|kill-all] <computer> [session]`.
