@@ -166,7 +166,7 @@ nothing appears twice.
   already open as a desktop, the session opens as an extra terminal next to it.
 - From a script: `remote-sessions [list|kill|kill-all] <computer> [session]`.
 - **Disconnect** closes the window; the tmux session keeps running on the computer, so you pick up exactly where you
-  were. Right-click a chip, `Ctrl + D` in `Super + R`, or `d` in the manager closes every window of that workspace.
+  were. Right-click a chip, or press `d` in `Super + R` or the manager, and it closes every window of that workspace.
 - Settings per computer (in the manager under `e`, or in `remote-computers.json`): `"tmux": "off"` for a plain shell,
   `"session": "work"` for another default session name.
 - Needs key-based SSH login (`ssh-copy-id`), nothing else: no agent or daemon on the remote side except tmux itself.
