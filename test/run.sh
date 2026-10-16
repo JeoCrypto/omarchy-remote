@@ -45,6 +45,25 @@ ids=$(jq -r 'map(.id) | sort | join(",")' <<<"$out")
 check "bad session name"      2 env PATH="$tmp:$PWD/bin:$PATH" REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" bin/remote-sessions kill srv "a b"
 check "missing computer"      2 env PATH="$tmp:$PWD/bin:$PATH" bin/remote-sessions list
 check "unknown computer"      4 env PATH="$tmp:$PWD/bin:$PATH" REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" bin/remote-sessions list nosuchmachine
+# --- remote-desktop-status: no window titles or config on any command line ----------------------------
+# A command line is readable by every local user in /proc/<pid>/cmdline, and the bar runs this script every
+# few seconds. Wrap jq to record every argument it gets, and make sure no private data appears in them.
+realjq=$(command -v jq)
+cat > "$tmp/hyprctl" <<'EOS'
+#!/bin/sh
+echo '[{"address":"0x1","title":"SECRET-WINDOW-TITLE","workspace":{"name":"srv"}}]'
+EOS
+cat > "$tmp/jq" <<EOS
+#!/bin/sh
+printf '%s\n' "\$@" >> "$tmp/jq-args"
+exec "$realjq" "\$@"
+EOS
+chmod +x "$tmp/hyprctl" "$tmp/jq"
+echo '[{"host":"srv","label":"SECRET-LABEL","user":"SECRET-USER"}]' > "$tmp/conf.json"
+: > "$tmp/jq-args"
+out=$(PATH="$tmp:$PATH" REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" bin/remote-desktop-status --all)
+if grep -qE 'SECRET-|bob|srvalias' "$tmp/jq-args"; then echo "FAIL private data passed on a jq command line"; fail=1; else echo "ok   no private data on jq command lines"; fi
+[[ $(jq -r '.[] | select(.id == "srv") | "\(.open) \(.label)"' <<<"$out") == "true SECRET-LABEL" ]] && echo "ok   open flag and config still applied" || { echo "FAIL open/label: $out"; fail=1; }
 rm -rf "$tmp"
 (( fail )) && echo "some checks failed" || echo "all checks passed"
 exit $fail

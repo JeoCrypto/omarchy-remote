@@ -17,7 +17,13 @@ all=false; [[ ${1:-} == --all ]] && all=true
 cfg="${REMOTE_CONF:-$HOME/.config/omarchy/remote-computers.json}"
 over='[]'; [[ -r $cfg ]] && over=$(cat "$cfg")
 ts=$(tailscale status --json 2>/dev/null); [[ -n $ts ]] || ts='{}'
-cl=$(hyprctl clients -j 2>/dev/null);      [[ -n $cl ]] || cl='[]'
+# Only the workspace names of open windows are needed (to mark a computer as open). Reduce the client list in a
+# pipe so window titles are never held in a variable, and never passed to a command line (see below).
+cl=$(hyprctl clients -j 2>/dev/null | jq -c '[.[].workspace.name] | unique' 2>/dev/null); [[ -n $cl ]] || cl='[]'
+
+# Data is handed to jq through file descriptors, never as arguments: a command line is readable by every local
+# user in /proc/<pid>/cmdline, and this script runs every few seconds from the bar.
+json() { printf '%s' "$1"; }
 
 # SSH config entries: explicit Host names only. One JSON object per host: alias, hostname, user, port.
 sshcfg="${REMOTE_SSH_CONFIG:-$HOME/.ssh/config}"
@@ -56,13 +62,16 @@ if (( ${#probes[@]} )); then
     i=$((i + 1))
   done
   wait
-  for ((j = 0; j < i; j++)); do
-    reach=$(jq -c --arg k "$(cat "$tmp/$j.host"):$(cat "$tmp/$j.port")" --argjson v "$(cat "$tmp/$j.res")" '.[$k] = ($v or .[$k] // false)' <<<"$reach")
-  done
+  reach=$(
+    for ((j = 0; j < i; j++)); do printf '%s:%s\t%s\n' "$(cat "$tmp/$j.host")" "$(cat "$tmp/$j.port")" "$(cat "$tmp/$j.res")"; done \
+      | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t")) | reduce .[] as [$k, $v] ({}; .[$k] = (($v == "true") or (.[$k] // false)))'
+  )
   rm -rf "$tmp"
 fi
 
-jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjson ssh "$ssh" --argjson all "$all" '
+jq -c --slurpfile over_ <(json "$over") --slurpfile cl_ <(json "$cl") --slurpfile reach_ <(json "$reach") \
+  --slurpfile ssh_ <(json "$ssh") --argjson all "$all" '
+  $over_[0] as $over | $cl_[0] as $cl | $reach_[0] as $reach | $ssh_[0] as $ssh |
   def short: (.DNSName // "" | split(".")[0] | ascii_downcase);
   def tidy($n): ($n | ascii_downcase | gsub("[-_]+"; " ") | split(" ") | map(select(length > 0) | (.[0:1] | ascii_upcase) + .[1:]) | join(" "));
   def client_default($os): if $os == "windows" then "freerdp" elif $os == "macos" then "vnc" else "ssh" end;
@@ -89,7 +98,7 @@ jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjs
         mac_size: ($o.mac_size // ""),
         ip: (($p.TailscaleIPs // [""])[0]),
         online: ($p.Online == true or $p.Active == true or (($p.CurAddr // "") != "")),
-        open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
+        open: ($cl | index($host) != null),
         manual: false,
         ssh: sshalias([$host, ($p.HostName // "" | ascii_downcase)]),
         tmux: ($o.tmux // ""),
@@ -118,7 +127,7 @@ jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjs
           mac_size: ($o.mac_size // ""),
           ip: $host,
           online: ($reach[$host + ":" + (if $os == "windows" then "3389" elif $os == "macos" then "5900" else "22" end)] // false),
-          open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
+          open: ($cl | index($host) != null),
           manual: true,
           ssh: sshalias([$host]),
           tmux: ($o.tmux // ""),
@@ -142,7 +151,7 @@ jq -c --argjson over "$over" --argjson cl "$cl" --argjson reach "$reach" --argjs
           title: "", cmd: "", fit: "", scale: "", mac_display: "", mac_size: "",
           ip: $e.hostname,
           online: ($reach[($e.hostname | ascii_downcase) + ":" + $e.port] // false),
-          open: ([ $cl[] | select(.workspace.name == $host) ] | length > 0),
+          open: ($cl | index($host) != null),
           manual: false,
           ssh: $e.alias,
           tmux: ($o.tmux // ""),
