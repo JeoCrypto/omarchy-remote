@@ -64,6 +64,55 @@ echo '[{"host":"srv","label":"SECRET-LABEL","user":"SECRET-USER"}]' > "$tmp/conf
 out=$(PATH="$tmp:$PATH" REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" bin/remote-desktop-status --all)
 if grep -qE 'SECRET-|bob|srvalias' "$tmp/jq-args"; then echo "FAIL private data passed on a jq command line"; fail=1; else echo "ok   no private data on jq command lines"; fi
 [[ $(jq -r '.[] | select(.id == "srv") | "\(.open) \(.label)"' <<<"$out") == "true SECRET-LABEL" ]] && echo "ok   open flag and config still applied" || { echo "FAIL open/label: $out"; fail=1; }
+
+# --- remote-manage: cache + state directories and files are owner-only -------------------------------
+# Host names, user names and local status in ~/.cache/omarchy-remote and ~/.local/state/omarchy-remote are
+# private to the user. Verify the dirs are 0700 and the files 0600, including the upgrade case where an
+# older install already left a world-readable cache behind.
+mode() { stat -c '%a' "$1" 2>/dev/null; }
+
+home=$(mktemp -d); chmod 755 "$home"
+cache="$home/cache/omarchy-remote"
+state="$home/state/omarchy-remote"
+# Simulate an older install: cache dir and status.json world-readable, state dir and starred too.
+mkdir -p "$cache" "$state"; chmod 755 "$cache" "$state"
+echo '[{"id":"srv","host":"srv","label":"srv","online":true,"open":false,"hidden":false,"os":"linux"}]' > "$cache/status.json"
+chmod 644 "$cache/status.json"
+: > "$state/starred"; chmod 644 "$state/starred"
+
+run_rm() {
+  env -i PATH="$tmp:$PWD/bin:/usr/bin:/bin" HOME="$home" \
+    XDG_CACHE_HOME="$home/cache" XDG_STATE_HOME="$home/state" \
+    REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" \
+    bin/remote-manage "$@" >/dev/null 2>&1
+}
+
+# A read-only sub-command exercises the dir/file setup without needing a TTY.
+run_rm rows || true
+[[ $(mode "$cache") == 700 ]]                  && echo "ok   cache dir repaired to 0700"              || { echo "FAIL cache dir perms: $(mode "$cache")"; fail=1; }
+[[ $(mode "$state") == 700 ]]                  && echo "ok   state dir repaired to 0700"              || { echo "FAIL state dir perms: $(mode "$state")"; fail=1; }
+[[ $(mode "$cache/status.json") == 600 ]]      && echo "ok   existing status.json repaired to 0600"   || { echo "FAIL status.json perms: $(mode "$cache/status.json")"; fail=1; }
+[[ $(mode "$state/starred") == 600 ]]          && echo "ok   starred file is 0600"                    || { echo "FAIL starred perms: $(mode "$state/starred")"; fail=1; }
+
+# rows-fresh writes a brand-new status.json via a temp file + rename; the result must be 0600 without needing a chmod.
+rm -f "$cache/status.json"
+run_rm rows-fresh || true
+if [[ -e $cache/status.json ]]; then
+  [[ $(mode "$cache/status.json") == 600 ]]    && echo "ok   fresh status.json created as 0600"       || { echo "FAIL fresh status.json perms: $(mode "$cache/status.json")"; fail=1; }
+else
+  echo "FAIL rows-fresh did not write status.json"; fail=1
+fi
+
+# Also check: a brand-new install (no pre-existing dirs) still ends up with 0700 dirs.
+home2=$(mktemp -d); chmod 755 "$home2"
+env -i PATH="$tmp:$PWD/bin:/usr/bin:/bin" HOME="$home2" \
+  XDG_CACHE_HOME="$home2/cache" XDG_STATE_HOME="$home2/state" \
+  REMOTE_CONF="$tmp/conf.json" REMOTE_SSH_CONFIG="$tmp/ssh_config" \
+  bin/remote-manage rows >/dev/null 2>&1 || true
+[[ $(mode "$home2/cache/omarchy-remote") == 700 ]] && echo "ok   fresh install creates cache dir 0700" || { echo "FAIL fresh cache dir perms: $(mode "$home2/cache/omarchy-remote")"; fail=1; }
+[[ $(mode "$home2/state/omarchy-remote") == 700 ]] && echo "ok   fresh install creates state dir 0700" || { echo "FAIL fresh state dir perms: $(mode "$home2/state/omarchy-remote")"; fail=1; }
+rm -rf "$home" "$home2"
+
 rm -rf "$tmp"
 (( fail )) && echo "some checks failed" || echo "all checks passed"
 exit $fail

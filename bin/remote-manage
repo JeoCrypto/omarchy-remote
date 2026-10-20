@@ -14,6 +14,11 @@
 # makes no connection; nothing is changed until you choose to.
 set -uo pipefail
 
+# Cache and state hold host names, user names and local status that are private to this user.
+# Make every new file owner-only (umask 077), and repair pre-existing world-readable paths from older
+# installs on every run (chmod the dir to 0700 and files to 0600).
+umask 077
+
 CONF="${REMOTE_CONF:-$HOME/.config/omarchy/remote-computers.json}"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-remote"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-remote"
@@ -21,8 +26,11 @@ CACHE="$CACHE_DIR/status.json"
 STARS="$STATE_DIR/starred"
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 mkdir -p "$CACHE_DIR" "$STATE_DIR" "$(dirname "$CONF")"
+chmod 700 "$CACHE_DIR" "$STATE_DIR" 2>/dev/null || true
+[[ -e $CACHE ]] && chmod 600 "$CACHE" 2>/dev/null || true
 [[ -f $CONF ]] || echo '[]' > "$CONF"
 touch "$STARS"
+chmod 600 "$STARS" 2>/dev/null || true
 
 dim=$'\033[2m'; bold=$'\033[1m'; green=$'\033[32m'; rst=$'\033[0m'
 

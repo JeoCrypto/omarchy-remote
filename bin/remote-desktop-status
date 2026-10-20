@@ -13,6 +13,11 @@
 # Hosts from ~/.ssh/config (explicit "Host" names, no wildcards) also appear, as terminal ("ssh") computers, unless
 # they are the same machine as a Tailscale one; then the alias is attached to it (used for tmux sessions).
 # REMOTE_SSH_CONFIG points at another ssh config file (used by the tests).
+
+# This script runs every few seconds and writes probe scratch files under a temp directory. Keep the dir
+# and anything we create inside it owner-only (umask 077; mktemp -d is already 0700 on Linux).
+umask 077
+
 all=false; [[ ${1:-} == --all ]] && all=true
 cfg="${REMOTE_CONF:-$HOME/.config/omarchy/remote-computers.json}"
 over='[]'; [[ -r $cfg ]] && over=$(cat "$cfg")

@@ -8,6 +8,10 @@
 #        remote-desktop --disconnect <computer>  (close its window; the computer's session keeps running)
 set -uo pipefail
 
+# Any state or log this script writes stays owner-only. umask 077 makes new files 0600 and new dirs 0700
+# from the start; existing files are repaired below next to their first use.
+umask 077
+
 # --- disconnect everything --------------------------------------------------------------------------
 if [[ ${1:-} == --disconnect-all ]]; then
   for did in $(remote-desktop-status --all | jq -r '.[] | select(.open) | .id'); do remote-desktop --disconnect "$did"; done
@@ -50,6 +54,8 @@ label=$(jq -r .label <<<"$c"); host=$(jq -r .host <<<"$c"); client=$(jq -r .clie
 user=$(jq -r .user <<<"$c"); title=$(jq -r .title <<<"$c"); cmdmode=$(jq -r '.cmd // ""' <<<"$c"); fitmode=$(jq -r '.fit // ""' <<<"$c"); scalepct=$(jq -r '.scale // ""' <<<"$c"); os=$(jq -r .os <<<"$c"); macdisp=$(jq -r '.mac_display // ""' <<<"$c"); macsize=$(jq -r '.mac_size // ""' <<<"$c"); manual=$(jq -r '.manual // false' <<<"$c"); sshalias=$(jq -r '.ssh // ""' <<<"$c"); tmuxmode=$(jq -r '.tmux // ""' <<<"$c"); defsession=$(jq -r '.session // ""' <<<"$c"); online=$(jq -r .online <<<"$c"); open=$(jq -r .open <<<"$c")
 class="omarchy-remote-$host"
 log="${XDG_RUNTIME_DIR:-/tmp}/remote-desktop-$host.log"
+# Logs can contain host names and FreeRDP error detail. Repair a pre-existing world-readable log too.
+[[ -e $log ]] && chmod 600 "$log" 2>/dev/null || true
 
 focus_ws() { hyprctl dispatch "hl.dsp.focus({ workspace = \"name:$host\" })" >/dev/null 2>&1; }
 
@@ -66,7 +72,10 @@ fi
 # No gaps on this workspace: the remote desktop fills the area under the bar.
 # Remember the host so ~/.config/hypr/remote.lua can re-declare the rule after a reload or restart.
 state="$HOME/.local/state/omarchy-remote/hosts"; mkdir -p "${state%/*}"
+chmod 700 "${state%/*}" 2>/dev/null || true
+[[ -e $state ]] && chmod 600 "$state" 2>/dev/null || true
 grep -qxF "$host" "$state" 2>/dev/null || echo "$host" >> "$state"
+chmod 600 "$state" 2>/dev/null || true
 hyprctl eval "hl.workspace_rule({ workspace = \"name:$host\", gaps_in = 0, gaps_out = 0 })" >/dev/null 2>&1
 
 # Go to the computer's workspace first, so the new window opens right there.
