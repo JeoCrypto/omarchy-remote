@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="480" viewBox="0 0 1280 480" role="img" aria-labelledby="title desc">
+  <title id="title">Omarchy Remote — every computer, one workspace away</title>
+  <desc id="desc">A charcoal and orange illustration linking an Omarchy desktop to Windows, macOS and SSH computers.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#292420"/><stop offset="1" stop-color="#131313"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#e8743b" stop-opacity=".15"/><stop offset="1" stop-color="#e8743b" stop-opacity="0"/></radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#fff" stroke-opacity=".025"/></pattern>
+  </defs>
+  <rect width="1280" height="480" rx="24" fill="url(#bg)"/>
+  <rect width="1280" height="480" rx="24" fill="url(#grid)"/>
+  <ellipse cx="950" cy="250" rx="350" ry="290" fill="url(#glow)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="64" y="64" width="173" height="30" rx="15" fill="#e8743b" fill-opacity=".12" stroke="#e8743b" stroke-opacity=".35"/>
+    <text x="150" y="84" text-anchor="middle" fill="#f4a579" font-size="12" font-weight="700" letter-spacing="2">FOR OMARCHY</text>
+    <text x="60" y="186" fill="#f5eee8" font-size="64" font-weight="700" letter-spacing="-2">Omarchy Remote</text>
+    <text x="64" y="237" fill="#d0c2b7" font-size="25">Every computer.</text>
+    <text x="64" y="273" fill="#d0c2b7" font-size="25">One workspace away.</text>
+    <rect x="64" y="323" width="110" height="40" rx="9" fill="#e8743b"/>
+    <text x="119" y="349" fill="#1c1917" font-size="16" font-weight="700" text-anchor="middle">Super + R</text>
+    <text x="191" y="349" fill="#b6a69a" font-size="15">Pick. Connect. Carry on.</text>
+    <text x="64" y="429" fill="#887a70" font-size="12" letter-spacing="2">WINDOWS / macOS / LINUX + SSH</text>
+    <g fill="none" stroke="#e8743b" stroke-opacity=".6" stroke-width="2">
+      <path d="M911 240H950V110H1000"/><path d="M950 240H1000"/><path d="M950 240V370H1000"/>
+    </g>
+    <rect x="674" y="154" width="238" height="164" rx="13" fill="#191918" stroke="#675043"/>
+    <path d="M687 154H899Q912 154 912 167V183H674V167Q674 154 687 154" fill="#302923"/>
+    <circle cx="691" cy="169" r="4" fill="#e8743b"/>
+    <rect x="704" y="165" width="25" height="8" rx="4" fill="#817064"/>
+    <rect x="738" y="165" width="39" height="8" rx="4" fill="#e8743b" fill-opacity=".55"/>
+    <rect x="689" y="199" width="133" height="103" rx="5" fill="#29231f"/>
+    <rect x="831" y="199" width="65" height="47" rx="5" fill="#3e2e25"/>
+    <rect x="831" y="255" width="65" height="47" rx="5" fill="#302923"/>
+    <path d="M754 338H832M793 319V338" stroke="#817064" stroke-width="4" stroke-linecap="round"/>
+    <text x="793" y="378" fill="#d0c2b7" font-size="14" text-anchor="middle">Your Omarchy desktop</text>
+    <g fill="#211e1b" stroke="#584437">
+      <rect x="1000" y="73" width="208" height="74" rx="12"/>
+      <rect x="1000" y="203" width="208" height="74" rx="12"/>
+      <rect x="1000" y="333" width="208" height="74" rx="12"/>
+    </g>
+    <g fill="#e8743b"><circle cx="1021" cy="101" r="4"/><circle cx="1021" cy="231" r="4"/><circle cx="1021" cy="361" r="4"/></g>
+    <g fill="#f5eee8" font-size="17" font-weight="700"><text x="1036" y="107">Windows</text><text x="1036" y="237">macOS</text><text x="1036" y="367">Linux + SSH</text></g>
+    <g fill="#ae9e92" font-size="12"><text x="1036" y="129">RDP desktop</text><text x="1036" y="259">VNC screen sharing</text><text x="1036" y="389">Persistent tmux sessions</text></g>
+  </g>
+</svg>

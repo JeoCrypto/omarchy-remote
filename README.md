@@ -1,50 +1,73 @@
-<div align="center">
+<p align="center">
+  <img src="assets/banner.svg" alt="Omarchy Remote — every computer, one workspace away" width="100%">
+</p>
 
-# omarchy-remote
+<h1 align="center">Omarchy Remote</h1>
 
-**One-click remote desktops for [Omarchy](https://omarchy.org), built on FreeRDP and Tailscale.**
+<p align="center">
+  <b>Your Windows desktop. Your Mac. Your servers. Right inside <a href="https://omarchy.org">Omarchy</a>.</b><br>
+  Pick a computer · open its workspace · carry on where you left off
+</p>
 
-![Omarchy](https://img.shields.io/badge/Omarchy-plugin-5b8def) ![Windows](https://img.shields.io/badge/Windows-RDP-0078d4) ![macOS](https://img.shields.io/badge/macOS-VNC-999999) ![Linux](https://img.shields.io/badge/Linux-SSH-e95420) ![License](https://img.shields.io/badge/license-MIT%20%2B%20GPL--2.0%2B-green)
+<p align="center">
+  <img alt="Omarchy shell plugin" src="https://img.shields.io/badge/Omarchy-shell_plugin-e8743b?style=flat-square&amp;labelColor=1c1917">
+  <img alt="Windows RDP" src="https://img.shields.io/badge/Windows-RDP-e8743b?style=flat-square&amp;labelColor=1c1917">
+  <img alt="macOS VNC" src="https://img.shields.io/badge/macOS-VNC-e8743b?style=flat-square&amp;labelColor=1c1917">
+  <img alt="Linux SSH" src="https://img.shields.io/badge/Linux-SSH-e8743b?style=flat-square&amp;labelColor=1c1917">
+  <a href="#credits-and-licenses"><img alt="MIT and GPL-2.0-or-later licences" src="https://img.shields.io/badge/licence-MIT_%2B_GPL--2.0%2B-e8743b?style=flat-square&amp;labelColor=1c1917"></a>
+</p>
 
-*Developed by **JeoCrypto**.*
+<p align="center">
+  <a href="#quick-start">Get started</a> ·
+  <a href="#use">Shortcuts</a> ·
+  <a href="#settings">Configure</a> ·
+  <a href="#troubleshooting">Troubleshooting</a> ·
+  <a href="#credits-and-licenses">Credits</a>
+</p>
 
-</div>
+---
 
-Every Windows, Mac or Linux computer on your Tailscale network shows up in the top bar next to your workspaces
-and in a `Super + R` picker. Click one and its screen opens full size on its own workspace, like switching to
-workspace 3: no remote-desktop app, no toolbar, no tabs. `Super + Tab` takes you back.
+Remote computers should feel as close as your next workspace. **Omarchy Remote** puts your Tailscale computers in the top bar and a `Super + R` picker. Choose one and its desktop opens full size on its own workspace. `Super + Tab` brings you back; the remote connection stays open.
 
-## Contents
+## A whole desk, one keyboard
 
-[Features](#features) · [Quick start](#quick-start) · [Requirements](#requirements) · [Install](#install) · [Use](#use) · [The manager](#the-manager-super--shift--r) ·
-[SSH and tmux](#ssh-hosts-and-tmux) · [Omarchy menu](#the-omarchy-menu) · [Computers not on Tailscale](#computers-that-are-not-on-tailscale) · [Settings](#settings) · [How it works](#how-it-works) ·
-[Keeping Windows reachable](#keeping-windows-computers-reachable) · [Security](#security-and-privacy) ·
-[Troubleshooting](#troubleshooting) · [Development](#development) · [Credits](#credits-and-licenses)
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>🖥️ Windows, at full resolution</h3>
+      FreeRDP opens your desktop at your monitor’s real pixel size, with dynamic resizing and sharp text on HiDPI screens.
+    </td>
+    <td width="50%" valign="top">
+      <h3>🍎 Your Mac, within reach</h3>
+      The included lightweight VNC viewer supports Apple login, two-way clipboard and optional display matching.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>⌨️ Servers that remember your place</h3>
+      SSH hosts get their own terminal workspace. Persistent tmux sessions let you disconnect and return to your work later.
+    </td>
+    <td valign="top">
+      <h3>✨ At home in Omarchy</h3>
+      Computers appear from Tailscale and your SSH config. Connect from the bar or the picker, and keep using your local Super shortcuts.
+    </td>
+  </tr>
+</table>
 
-## Features
+<p align="center"><b>Discover automatically · connect in one click · keep passwords in your keyring</b></p>
 
-| | |
-|---|---|
-| **Zero setup for new machines** | Join a computer to your tailnet and it appears by itself. |
-| **Windows** | FreeRDP's own window, sized to your monitor's real pixels: sharp, and it resizes with the window. |
-| **macOS** | `omarchy-vnc`, a tiny viewer included here (about 30 KB, libvncclient + SDL3): Apple login, two-way clipboard, optional display matching. |
-| **Linux and SSH hosts** | A terminal on its own workspace running `ssh` with a persistent tmux session. Hosts from `~/.ssh/config` appear by themselves. |
-| **Passwords** | Kept in your keyring, never in a file, log or command line. |
-| **Omarchy shortcuts keep working** | `Super` never reaches the remote machine. |
-
-> This is a wrapper around existing tools, not a new RDP implementation. The protocol work is done by
-> [FreeRDP](https://www.freerdp.com) (Windows) and [libvncclient](https://libvnc.github.io) (Mac).
+> Built on [FreeRDP](https://www.freerdp.com), [libvncclient](https://libvnc.github.io) and SSH, with [Tailscale](https://tailscale.com) for private connectivity. Remote access must be enabled on each target computer.
 
 ## Quick start
 
 1. **Run the guided setup** (adds the plugin, installs missing packages after asking, checks Tailscale, installs everything):
-   ```
+   ```bash
    bash <(curl -fsSL https://raw.githubusercontent.com/JeoCrypto/omarchy-remote/main/setup.sh)
    ```
-   Prefer to read it first? It is [`setup.sh`](setup.sh), about 90 lines. Or follow [Install](#install) by hand.
+   Prefer to read it first? Open [`setup.sh`](setup.sh). Or follow [Install](#install) by hand.
 2. **Tailscale on every computer** you want to reach, signed in to the same account (`sudo tailscale up` here).
-3. **Turn on remote access on each target.** Windows: Settings > System > Remote Desktop. Mac: System Settings >
-   General > Sharing > Screen Sharing. Linux: an SSH server.
+3. **Turn on remote access on each target.** Windows: Settings > System > Remote Desktop (requires an edition that supports hosting RDP, such as Pro). Mac: System Settings >
+   General > Sharing > Screen Sharing; also enable Remote Login for the display-matching helper. Linux: an SSH server.
 4. **Press `Super + R`**, pick a computer. The first time it asks for the user name and password once and saves the
    password in your keyring. After that it is one click.
 
@@ -56,9 +79,9 @@ If you added the plugin through the marketplace or `omarchy plugin add` and skip
 - Omarchy (Hyprland + the Omarchy shell) and [Tailscale](https://tailscale.com), signed in
 - `freerdp` (provides `sdl-freerdp3`), `libsecret` (`secret-tool`), `jq`, `openssh`
 - To build the Mac viewer: `gcc`, `make`, `pkgconf`, `sdl3`, `libvncserver` (already on a stock Omarchy)
-- On each Windows computer: Remote Desktop turned on. On each Mac: Screen Sharing turned on.
+- On each Windows computer: an RDP host-capable edition (such as Pro), with Remote Desktop turned on. On each Mac: Screen Sharing turned on.
 
-```
+```bash
 omarchy pkg add freerdp libsecret jq openssh gcc make pkgconf sdl3 libvncserver
 ```
 
@@ -66,7 +89,7 @@ omarchy pkg add freerdp libsecret jq openssh gcc make pkgconf sdl3 libvncserver
 
 **From a clone** (recommended; builds the Mac viewer and sets everything up):
 
-```
+```bash
 git clone https://github.com/JeoCrypto/omarchy-remote.git && cd omarchy-remote
 ./install.sh --dry-run     # see exactly what it will do
 ./install.sh
@@ -74,7 +97,7 @@ git clone https://github.com/JeoCrypto/omarchy-remote.git && cd omarchy-remote
 
 **Through Omarchy's plugin manager** (the same repo, listed in the plugin marketplace):
 
-```
+```bash
 omarchy plugin add https://github.com/JeoCrypto/omarchy-remote.git
 cd ~/.config/omarchy/plugins/omarchy-remote && ./install.sh
 ```
@@ -259,7 +282,7 @@ Tailscale only helps while a computer is awake. `windows/keep-awake.ps1` makes a
 is plugged in: it turns on Tailscale's *Run unattended* (so signing out doesn't drop it) and sets sleep and hibernate
 to *never* on AC power, leaving battery settings alone. The original values are saved on the PC. Run it over SSH:
 
-```
+```bash
 ssh <pc> "$(cat windows/keep-awake.ps1)"
 ```
 
@@ -294,7 +317,7 @@ local network and is unreliable over Wi-Fi; keeping the PC awake while plugged i
 
 ## Development
 
-```
+```bash
 make            # build omarchy-vnc
 make test       # headless login checks against a local test server (right/wrong password, unreachable)
 ```
@@ -315,3 +338,15 @@ and Omarchy.
 
 - `src/omarchy-vnc.c`: **GPL-2.0-or-later** (it links libvncclient). See `COPYING.GPL-2.0`.
 - Everything else (scripts, plugins, Hyprland rules, `mac/mac-display.c`, tests): **MIT**. See `LICENSE`.
+
+
+---
+
+<p align="center">
+  <b>More from JeoCrypto, for Omarchy</b><br>
+  <a href="https://github.com/JeoCrypto/omarchy-golden-gate-theme">Golden Gate theme</a> ·
+  <a href="https://github.com/JeoCrypto/omarchy-glass-dock">Glass Dock</a> ·
+  <a href="https://github.com/JeoCrypto/omarchy-snap-layouts">Snap Layouts</a>
+</p>
+
+<p align="center"><sub>Made by JeoCrypto · Scripts and plugins: MIT · VNC viewer: GPL-2.0-or-later</sub></p>
