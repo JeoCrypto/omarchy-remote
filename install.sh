@@ -91,6 +91,8 @@ fi
 # ---- 3. files -----------------------------------------------------------------------------------
 say "Installing programs to $BIN"
 run mkdir -p "$BIN" "$SHARE" "$STATE"
+# The state dir keeps per-user host lists and other private data; keep it owner-only.
+(( dry )) || chmod 700 "$STATE" 2>/dev/null || true
 for f in remote-desktop remote-desktop-setup remote-desktop-status remote-fullscreen remote-manage remote-sessions; do
   run install -m755 "$here/bin/$f" "$BIN/$f"
 done

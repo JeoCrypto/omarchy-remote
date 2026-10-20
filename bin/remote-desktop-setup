@@ -3,6 +3,10 @@
 # One-time per Windows computer: ask for the user name and password, verify the login once,
 # keep the password in the GNOME keyring (never in a file), then connect.
 # Usage: remote-desktop-setup <computer>
+
+# Keep any file this script writes (the config update, the mktemp scratch) owner-only from the start.
+umask 077
+
 key="${1:-}"; over="$HOME/.config/omarchy/remote-computers.json"
 wait_key() { read -rp "Press Enter to close"; }
 c=$(remote-desktop-status --all | jq -c --arg k "${key,,}" '[.[] | select(.id == $k or (.label | ascii_downcase) == $k)] | first // empty')
