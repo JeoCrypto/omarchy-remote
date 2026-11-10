@@ -349,4 +349,4 @@ and Omarchy.
   <a href="https://github.com/JeoCrypto/omarchy-snap-layouts">Snap Layouts</a>
 </p>
 
-<p align="center"><sub>Made by JeoCrypto · Scripts and plugins: MIT · VNC viewer: GPL-2.0-or-later</sub></p>
+<p align="center"><sub>Made by JeoCrypto · Contributed by <a href="https://vgsi.pt">VGSI</a> · Scripts and plugins: MIT · VNC viewer: GPL-2.0-or-later</sub></p>
